@@ -382,9 +382,10 @@ def main():
                     return 1
                 log("  requirements 同步完成")
             for pkg in sorted((PROJECT / "packages").glob("*/pyproject.toml")):
-                # --no-build-isolation：复用 venv 内已装好的 hatchling，离线也能构建
-                rc, out = run([str(VENV_PY), "-m", "pip", "install", "-q", "--no-build-isolation",
-                               "-e", str(pkg.parent)], timeout=600)
+                # 默认走 build isolation：pip 在隔离环境内自动拉取 hatchling 等构建后端
+                # （本机代理偶发 502，脚本已带网络类失败重试；本步失败会自动保留旧版本）
+                rc, out = run([str(VENV_PY), "-m", "pip", "install", "-q", "-e", str(pkg.parent)],
+                              timeout=600)
                 if rc != 0:
                     log(f"[失败] editable 安装失败（{pkg.parent.name}），保持旧版本：\n{out[-800:]}")
                     return 1
