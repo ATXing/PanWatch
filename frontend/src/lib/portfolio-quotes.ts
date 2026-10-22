@@ -10,6 +10,60 @@ export interface QuoteResponse extends DisplayQuote {
   market: string
 }
 
+export interface FeeProfile {
+  commission_rate: number
+  min_commission: number
+  stamp_duty_rate: number
+  stamp_duty_sides: 'both' | 'buy' | 'sell'
+  transfer_fee_rate: number
+  misc_fee_rate: number
+  misc_fee_sides: 'both' | 'buy' | 'sell'
+}
+
+// 与后端 src/modules/portfolio/fees.py 默认值保持一致（后端会随接口下发，此处仅兜底）
+export const DEFAULT_FEE_PROFILES: Record<string, FeeProfile> = {
+  CN: { commission_rate: 0.00025, min_commission: 5, stamp_duty_rate: 0.0005, stamp_duty_sides: 'sell', transfer_fee_rate: 0.00001, misc_fee_rate: 0, misc_fee_sides: 'both' },
+  HK: { commission_rate: 0.0008, min_commission: 15, stamp_duty_rate: 0.001, stamp_duty_sides: 'both', transfer_fee_rate: 0, misc_fee_rate: 0.000058, misc_fee_sides: 'both' },
+  US: { commission_rate: 0, min_commission: 0, stamp_duty_rate: 0, stamp_duty_sides: 'sell', transfer_fee_rate: 0, misc_fee_rate: 0.0000278, misc_fee_sides: 'sell' },
+}
+
+const ruleFee = (rate: number, sides: string, minAmount: number, side: 'buy' | 'sell', notional: number): number => {
+  if (notional <= 0) return 0
+  if (sides !== 'both' && sides !== side) return 0
+  if (rate <= 0 && minAmount <= 0) return 0
+  return Math.max(notional * rate, minAmount)
+}
+
+/** 净盈亏(含费口径): 市值 - 含买入费成本 - 预估卖出费。与后端 fees.py 同数学。 */
+export const computeNetPnl = (
+  costPrice: number,
+  quantity: number,
+  currentPrice: number,
+  profile: FeeProfile
+) => {
+  const buyNotional = costPrice * quantity
+  const buyFees =
+    ruleFee(profile.commission_rate, 'both', profile.min_commission, 'buy', buyNotional) +
+    ruleFee(profile.stamp_duty_rate, profile.stamp_duty_sides, 0, 'buy', buyNotional) +
+    ruleFee(profile.transfer_fee_rate, 'both', 0, 'buy', buyNotional) +
+    ruleFee(profile.misc_fee_rate, profile.misc_fee_sides, 0, 'buy', buyNotional)
+  const netCost = buyNotional + buyFees
+  const sellNotional = currentPrice * quantity
+  const sellFees =
+    ruleFee(profile.commission_rate, 'both', profile.min_commission, 'sell', sellNotional) +
+    ruleFee(profile.stamp_duty_rate, profile.stamp_duty_sides, 0, 'sell', sellNotional) +
+    ruleFee(profile.transfer_fee_rate, 'both', 0, 'sell', sellNotional) +
+    ruleFee(profile.misc_fee_rate, profile.misc_fee_sides, 0, 'sell', sellNotional)
+  const netPnl = sellNotional - sellFees - netCost
+  return {
+    net_cost: netCost,
+    net_cost_price: quantity > 0 ? netCost / quantity : costPrice,
+    total_fees: buyFees + sellFees,
+    net_pnl: netPnl,
+    net_pnl_pct: netCost > 0 ? (netPnl / netCost * 100) : 0,
+  }
+}
+
 export interface Position {
   id: number
   stock_id: number
@@ -29,6 +83,10 @@ export interface Position {
   market_value_cny: number | null  // 人民币市值
   pnl: number | null
   pnl_pct: number | null
+  net_pnl?: number | null        // 净盈亏（人民币，含费口径：市值 - 含买入费成本 - 预估卖出费）
+  net_pnl_pct?: number | null    // 净盈亏 %（与币种无关）
+  net_cost_price?: number | null // 含费成本价（原币种，≈券商 App 的"成本价"）
+  est_fees_cny?: number | null   // 预估费用合计（人民币：买入已付 + 卖出预估）
   daily_pnl: number | null
   daily_pnl_pct: number | null
   exchange_rate: number | null  // 汇率（仅港股）
@@ -44,6 +102,8 @@ export interface AccountSummary {
   total_cost: number
   total_pnl: number
   total_pnl_pct: number
+  total_net_pnl?: number | null
+  total_net_pnl_pct?: number | null
   total_daily_pnl: number
   total_assets: number
   positions: Position[]
@@ -56,6 +116,8 @@ export interface PortfolioSummary {
     total_cost: number
     total_pnl: number
     total_pnl_pct: number
+    total_net_pnl?: number | null
+    total_net_pnl_pct?: number | null
     total_daily_pnl: number
     available_funds: number
     total_assets: number
@@ -64,6 +126,7 @@ export interface PortfolioSummary {
     HKD_CNY: number
     USD_CNY?: number
   }
+  fee_profiles?: Record<string, FeeProfile>
   quotes?: Record<string, { current_price: number | null; change_pct: number | null }>
 }
 
@@ -95,11 +158,15 @@ export const mergePortfolioQuotes = (
   let grandCost = 0
   let grandAvailable = 0
   let grandDailyPnl = 0
+  let grandNetPnl = 0
+  let grandNetCost = 0
 
   const accounts = portfolio.accounts.map(account => {
     let accMarketValue = 0
     let accCost = 0
     let accDailyPnl = 0
+    let accNetPnl = 0
+    let accNetCost = 0
 
     const positions = account.positions.map(pos => {
       const quote = quotes[`${pos.market}:${pos.symbol}`]
@@ -119,6 +186,10 @@ export const mergePortfolioQuotes = (
       let pnl_pct: number | null = null
       let daily_pnl: number | null = null
       let daily_pnl_pct: number | null = null
+      let net_pnl: number | null = null
+      let net_pnl_pct: number | null = null
+      let net_cost_price: number | null = null
+      let est_fees_cny: number | null = null
 
       if (current_price != null) {
         market_value = current_price * pos.quantity
@@ -126,6 +197,16 @@ export const mergePortfolioQuotes = (
         accMarketValue += market_value_cny
         pnl = market_value_cny - cost
         pnl_pct = cost > 0 ? (pnl / cost * 100) : 0
+
+        // 净盈亏(含费口径): 与毛盈亏同源按实时价重算, 保证两列口径一致
+        const profile = portfolio.fee_profiles?.[pos.market] ?? DEFAULT_FEE_PROFILES[pos.market] ?? DEFAULT_FEE_PROFILES.CN
+        const net = computeNetPnl(pos.cost_price, pos.quantity, current_price, profile)
+        net_pnl = round2(net.net_pnl * rate)
+        net_pnl_pct = round2(net.net_pnl_pct)
+        net_cost_price = round2(net.net_cost_price)
+        est_fees_cny = round2(net.total_fees * rate)
+        accNetPnl += net.net_pnl * rate
+        accNetCost += net.net_cost * rate
       }
 
       if (daily_move_status === 'closed' || daily_move_status === 'pre_market') {
@@ -150,6 +231,10 @@ export const mergePortfolioQuotes = (
         pnl_pct,
         daily_pnl,
         daily_pnl_pct,
+        net_pnl,
+        net_pnl_pct,
+        net_cost_price,
+        est_fees_cny,
         daily_move_status,
         quote_date: quote ? quote.quote_date : pos.quote_date,
         exchange_rate: pos.market === 'HK' || pos.market === 'US' ? rate : null,
@@ -164,6 +249,8 @@ export const mergePortfolioQuotes = (
     grandCost += accCost
     grandAvailable += account.available_funds
     grandDailyPnl += accDailyPnl
+    grandNetPnl += accNetPnl
+    grandNetCost += accNetCost
 
     return {
       ...account,
@@ -171,6 +258,8 @@ export const mergePortfolioQuotes = (
       total_cost: round2(accCost),
       total_pnl: round2(accPnl),
       total_pnl_pct: round2(accPnlPct),
+      total_net_pnl: round2(accNetPnl),
+      total_net_pnl_pct: round2(accNetCost > 0 ? (accNetPnl / accNetCost * 100) : 0),
       total_daily_pnl: round2(accDailyPnl),
       total_assets: round2(accTotalAssets),
       positions,
@@ -189,6 +278,8 @@ export const mergePortfolioQuotes = (
       total_cost: round2(grandCost),
       total_pnl: round2(grandPnl),
       total_pnl_pct: round2(grandPnlPct),
+      total_net_pnl: round2(grandNetPnl),
+      total_net_pnl_pct: round2(grandNetCost > 0 ? (grandNetPnl / grandNetCost * 100) : 0),
       total_daily_pnl: round2(grandDailyPnl),
       available_funds: round2(grandAvailable),
       total_assets: round2(grandTotalAssets),

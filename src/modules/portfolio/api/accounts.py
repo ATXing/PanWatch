@@ -17,6 +17,7 @@ from src.platform.marketdata.marketdata_client import md_quote_rows
 from src.platform.marketdata.collectors.market_http import TTLCache
 from src.platform.marketdata.models import MarketCode
 from src.platform.marketdata.quote_display import daily_quote_fields
+from src.modules.portfolio.fees import fee_profiles_payload, net_pnl_breakdown
 from src.web.errors import ai_api_error, api_error
 
 logger = logging.getLogger(__name__)
@@ -448,12 +449,16 @@ def get_portfolio_summary(
     grand_total_cost = 0
     grand_available_funds = 0
     grand_daily_pnl = 0
+    grand_net_pnl = 0
+    grand_net_cost = 0
 
     for acc in accounts:
         positions_data = []
         acc_market_value = 0
         acc_cost = 0
         acc_daily_pnl = 0
+        acc_net_pnl = 0
+        acc_net_cost = 0
 
         positions_sorted = sorted(
             list(acc.positions or []),
@@ -485,6 +490,10 @@ def get_portfolio_summary(
             pnl_pct = None
             daily_pnl = None
             daily_pnl_pct = None
+            net_pnl = None          # 净盈亏(人民币, 含费口径)
+            net_pnl_pct = None      # 净盈亏%(与币种无关)
+            net_cost_price = None   # 含费成本价(原币种, ≈券商 App 的"成本价")
+            est_fees_cny = None     # 预估费用合计(人民币: 买入已付 + 卖出预估)
 
             if daily_fields["daily_move_status"] in ("closed", "pre_market"):
                 daily_pnl = 0.0
@@ -505,6 +514,17 @@ def get_portfolio_summary(
 
                 acc_market_value += market_value_cny
 
+                # 净盈亏(含费口径): 市值 − 含买入费成本 − 预估卖出费
+                net = net_pnl_breakdown(
+                    stock.market, pos.cost_price, pos.quantity, current_price
+                )
+                net_pnl = net["net_pnl"] * rate
+                net_pnl_pct = net["net_pnl_pct"]
+                net_cost_price = net["net_cost_price"]
+                est_fees_cny = net["total_fees"] * rate
+                acc_net_pnl += net_pnl
+                acc_net_cost += net["net_cost"] * rate
+
             positions_data.append({
                 "id": pos.id,
                 "stock_id": pos.stock_id,
@@ -524,6 +544,10 @@ def get_portfolio_summary(
                 "market_value_cny": round(market_value_cny, 2) if market_value_cny else None,
                 "pnl": round(pnl, 2) if pnl else None,
                 "pnl_pct": round(pnl_pct, 2) if pnl_pct else None,
+                "net_pnl": round(net_pnl, 2) if net_pnl is not None else None,
+                "net_pnl_pct": round(net_pnl_pct, 2) if net_pnl_pct is not None else None,
+                "net_cost_price": round(net_cost_price, 4) if net_cost_price is not None else None,
+                "est_fees_cny": round(est_fees_cny, 2) if est_fees_cny is not None else None,
                 "daily_pnl": round(daily_pnl, 2) if daily_pnl is not None else None,
                 "daily_pnl_pct": round(daily_pnl_pct, 2) if daily_pnl_pct is not None else None,
                 "exchange_rate": rate if is_foreign else None,
@@ -534,10 +558,13 @@ def get_portfolio_summary(
         if include_quotes:
             acc_pnl = acc_market_value - acc_cost
             acc_pnl_pct = (acc_pnl / acc_cost * 100) if acc_cost > 0 else 0
+            acc_net_pnl_pct = (acc_net_pnl / acc_net_cost * 100) if acc_net_cost > 0 else 0
             acc_total_assets = acc_market_value + acc.available_funds
         else:
             acc_pnl = 0
             acc_pnl_pct = 0
+            acc_net_pnl = 0
+            acc_net_pnl_pct = 0
             acc_total_assets = acc.available_funds
 
         account_summaries.append({
@@ -548,6 +575,8 @@ def get_portfolio_summary(
             "total_cost": round(acc_cost, 2),
             "total_pnl": round(acc_pnl, 2),
             "total_pnl_pct": round(acc_pnl_pct, 2),
+            "total_net_pnl": round(acc_net_pnl, 2),
+            "total_net_pnl_pct": round(acc_net_pnl_pct, 2),
             "total_daily_pnl": round(acc_daily_pnl, 2),
             "total_assets": round(acc_total_assets, 2),
             "positions": positions_data,
@@ -557,14 +586,19 @@ def get_portfolio_summary(
         grand_total_cost += acc_cost
         grand_available_funds += acc.available_funds
         grand_daily_pnl += acc_daily_pnl
+        grand_net_pnl += acc_net_pnl
+        grand_net_cost += acc_net_cost
 
     if include_quotes:
         grand_pnl = grand_total_market_value - grand_total_cost
         grand_pnl_pct = (grand_pnl / grand_total_cost * 100) if grand_total_cost > 0 else 0
+        grand_net_pnl_pct = (grand_net_pnl / grand_net_cost * 100) if grand_net_cost > 0 else 0
         grand_total_assets = grand_total_market_value + grand_available_funds
     else:
         grand_pnl = 0
         grand_pnl_pct = 0
+        grand_net_pnl = 0
+        grand_net_pnl_pct = 0
         grand_total_assets = grand_available_funds
 
     # 构建 quotes 字典（用于前端股票列表显示）
@@ -583,6 +617,8 @@ def get_portfolio_summary(
             "total_cost": round(grand_total_cost, 2),
             "total_pnl": round(grand_pnl, 2),
             "total_pnl_pct": round(grand_pnl_pct, 2),
+            "total_net_pnl": round(grand_net_pnl, 2),
+            "total_net_pnl_pct": round(grand_net_pnl_pct, 2),
             "total_daily_pnl": round(grand_daily_pnl, 2),
             "available_funds": round(grand_available_funds, 2),
             "total_assets": round(grand_total_assets, 2),
@@ -591,6 +627,7 @@ def get_portfolio_summary(
             "HKD_CNY": hkd_rate,
             "USD_CNY": usd_rate,
         },
+        "fee_profiles": fee_profiles_payload(),  # 前端按实时价重算净盈亏用
         "quotes": quotes_dict,  # 可选：返回行情数据
     }
 

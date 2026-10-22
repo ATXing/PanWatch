@@ -31,3 +31,13 @@ CLAUDE.md
 docs/superpowers/
 .superpowers/
 .worktrees/
+
+# 本地运维产物（熙语定制，勿入上游）
+logs/
+_trash/
+_ui_*.png
+_req_*.txt
+*.bak-*
+*.orig
+*.rej
+.panwatch_cred.json

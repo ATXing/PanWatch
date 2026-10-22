@@ -1606,15 +1606,30 @@ app.router.lifespan_context = lifespan
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
     from fastapi.staticfiles import StaticFiles
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, JSONResponse
 
-    # SPA 路由：所有非 API 请求返回 index.html
+    # SPA 路由：导航型请求返回 index.html；缺失的静态资源必须 404，严禁回退 HTML。
     @app.get("/{path:path}")
     async def serve_spa(path: str):
         file_path = os.path.join(static_dir, path)
         if os.path.isfile(file_path):
+            # 入口 HTML 不缓存，避免重建后浏览器沿用旧 index.html 而拉取已删除的旧 hash 分包
+            if path == "" or path.endswith(".html") or path == "index.html":
+                return FileResponse(file_path, headers={"Cache-Control": "no-cache"})
             return FileResponse(file_path)
-        return FileResponse(os.path.join(static_dir, "index.html"))
+
+        # 带扩展名的静态资源（/assets/*.js、*.css、*.png、*.svg、*.json 等）若缺失：
+        # 一律返回 404。绝不能回退成 index.html(text/html)——否则会被 Service Worker
+        # 误当成模块脚本缓存，引发浏览器 "Expected a JavaScript module ... MIME type
+        # text/html" 致命加载错误（持仓等懒加载分包打不开）。
+        # 仅「导航型路径」（无扩展名，如 /stocks、/dashboard）才回退 index.html 以支撑 SPA 路由。
+        _, ext = os.path.splitext(path)
+        if ext == "":
+            return FileResponse(
+                os.path.join(static_dir, "index.html"),
+                headers={"Cache-Control": "no-cache"},
+            )
+        return JSONResponse(status_code=404, content={"detail": f"Not Found: /{path}"})
 
     logger.info(f"静态文件服务已启用: {static_dir}")
 

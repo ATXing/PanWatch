@@ -1581,6 +1581,11 @@ export default function StocksPage() {
               {portfolioTotalsReady && <span className="block text-[13px] md:inline md:ml-1.5">
                 ({portfolio.total.total_pnl_pct >= 0 ? '+' : ''}{portfolio.total.total_pnl_pct.toFixed(2)}%)
               </span>}
+              {portfolioTotalsReady && portfolio.total.total_net_pnl != null && (
+                <span className="block text-[13px] md:inline md:ml-1.5">
+                  净 {portfolio.total.total_net_pnl >= 0 ? '+' : ''}{formatMoney(portfolio.total.total_net_pnl)} ({portfolio.total.total_net_pnl_pct != null ? `${portfolio.total.total_net_pnl_pct >= 0 ? '+' : ''}${portfolio.total.total_net_pnl_pct.toFixed(2)}%` : ''})
+                </span>
+              )}
             </div>
           </div>
 
@@ -1813,6 +1818,11 @@ export default function StocksPage() {
                         {unpricedAccountIds.has(account.id) ? '--' : `${account.total_pnl >= 0 ? '+' : ''}${formatMoney(account.total_pnl)}`}
                         {!unpricedAccountIds.has(account.id) && <span className="text-[10px] md:text-[11px] ml-1 hidden md:inline">({account.total_pnl_pct >= 0 ? '+' : ''}{account.total_pnl_pct.toFixed(2)}%)</span>}
                       </div>
+                      {!unpricedAccountIds.has(account.id) && account.total_net_pnl != null && (
+                        <div className="text-[10px] md:text-[11px] font-mono text-muted-foreground whitespace-nowrap">
+                          净 {account.total_net_pnl >= 0 ? '+' : ''}{formatMoney(account.total_net_pnl)} ({account.total_net_pnl_pct != null ? `${account.total_net_pnl_pct >= 0 ? '+' : ''}${account.total_net_pnl_pct.toFixed(2)}%` : ''})
+                        </div>
+                      )}
                     </div>
                     <div className="text-left md:text-right">
                       <div className="text-[10px] md:text-[11px] text-muted-foreground">{stockT('stocksPage.messages.today')}</div>
@@ -1858,6 +1868,7 @@ export default function StocksPage() {
                               <th className="text-right px-4 py-2 text-[11px] font-semibold text-muted-foreground">{stockT('stocksPage.messages.holding')}</th>
                               <th className="text-right px-4 py-2 text-[11px] font-semibold text-muted-foreground">{stockT('stocksPage.messages.marketValue')}</th>
                               <th className="text-right px-4 py-2 text-[11px] font-semibold text-muted-foreground">{stockT('stocksPage.messages.pnl')}</th>
+                              <th className="text-right px-4 py-2 text-[11px] font-semibold text-muted-foreground" title={stockT('stocksPage.messages.netPnlHint')}>{stockT('stocksPage.messages.netPnl')}</th>
                               <th className="text-right px-4 py-2 text-[11px] font-semibold text-muted-foreground">{stockT('stocksPage.messages.today')}</th>
                               <th className="text-center px-4 py-2 text-[11px] font-semibold text-muted-foreground">{stockT('stocksPage.messages.style')}</th>
                               <th className="text-left px-4 py-2 text-[11px] font-semibold text-muted-foreground">{stockT('stocksPage.messages.agent')}</th>
@@ -1957,6 +1968,14 @@ export default function StocksPage() {
                                       <div className="flex flex-col items-end">
                                         <span>{pos.pnl >= 0 ? '+' : ''}{formatMoney(pos.pnl)}</span>
                                         <span className="text-[10px] opacity-70">{pos.pnl_pct != null ? `${pos.pnl_pct >= 0 ? '+' : ''}${pos.pnl_pct.toFixed(2)}%` : ''}{isForeign && ' CNY'}</span>
+                                      </div>
+                                    ) : '—'}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-right font-mono text-[12px]" title={pos.net_pnl != null ? `净盈亏（含费口径）：市值 - 含买入费成本 - 预估卖出费` + (pos.net_cost_price != null ? ` · 含费成本价 ${formatPrice(pos.net_cost_price)}${isForeign ? (pos.market === 'HK' ? ' HKD' : ' USD') : ''}` : '') + (pos.est_fees_cny != null ? ` · 预估费用 ¥${formatMoney(pos.est_fees_cny)}` : '') : undefined}>
+                                    {pos.net_pnl != null ? (
+                                      <div className="flex flex-col items-end">
+                                        <span className={marketSignTextClass(pos.net_pnl)}>{pos.net_pnl >= 0 ? '+' : ''}{formatMoney(pos.net_pnl)}</span>
+                                        <span className="text-[10px] opacity-70 text-muted-foreground">{pos.net_pnl_pct != null ? `${pos.net_pnl_pct >= 0 ? '+' : ''}${pos.net_pnl_pct.toFixed(2)}%` : ''}{isForeign && ' CNY'}</span>
                                       </div>
                                     ) : '—'}
                                   </td>
@@ -2131,6 +2150,11 @@ export default function StocksPage() {
                                   {pos.pnl_pct != null && (
                                     <div className={`text-[10px] font-mono ${pnlColor} opacity-80`}>
                                       {pos.pnl_pct >= 0 ? '+' : ''}{pos.pnl_pct.toFixed(2)}%
+                                    </div>
+                                  )}
+                                  {pos.net_pnl != null && (
+                                    <div className={`text-[10px] font-mono ${marketSignTextClass(pos.net_pnl)} opacity-80`}>
+                                      净 {pos.net_pnl >= 0 ? '+' : ''}{formatMoney(pos.net_pnl)}
                                     </div>
                                   )}
                                 </div>

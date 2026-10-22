@@ -91,6 +91,14 @@ const INDEX_TRANSLATION_KEYS: Record<string, string> = {
   '000300': 'csi300',
 }
 
+/**
+ * 今日要紧事·大盘异动阈值:指数绝对涨跌幅达到该值才列入要紧事。
+ * 2026-10-21 按用户要求收紧要紧事来源(只保留持仓/自选/提醒/组合风险/大盘异动,
+ * 剔除机会页股票)时引入。多个指数同时越线时取波动最大的前 3 个,避免刷屏。
+ */
+const MARKET_MOVE_THRESHOLD_PCT = 1.0
+const MARKET_MOVE_MAX_ITEMS = 3
+
 export default function DashboardPage() {
   const navigate = useNavigate()
   const { t } = useTranslation('configuration')
@@ -288,6 +296,8 @@ export default function DashboardPage() {
     : brief?.agent_label
 
   // 今日必读候选(多源)→ 交 AI 策展(失败兜底原序)
+  // 2026-10-21: 按 Erin 要求收紧来源——只保留持仓/自选(关注)/提醒/组合风险/大盘异动,
+  // 剔除机会页股票(opportunity),避免不相关标的混入要紧事。
   const candidates = useMemo<CurateCandidate[]>(() => {
     const out: CurateCandidate[] = []
     for (const h of alertHits) {
@@ -304,11 +314,23 @@ export default function DashboardPage() {
       })
     }
     for (const a of localizedDiagnosticAlerts) out.push({ type: 'risk', name: dashboardT('dashboard.health'), market: '', signal: a })
-    for (const o of opportunities.slice(0, 3)) {
-      out.push({ type: 'opportunity', symbol: o.stock_symbol, name: o.stock_name || o.stock_symbol, market: o.stock_market, signal: o.signal || o.reason || o.action_label || '' })
+    // 大盘异动:与持仓/自选相关的市场环境信息,非个股推荐
+    const marketMoves = indices
+      .filter((idx) => idx.change_pct != null && Math.abs(idx.change_pct) >= MARKET_MOVE_THRESHOLD_PCT)
+      .sort((a, b) => Math.abs(b.change_pct || 0) - Math.abs(a.change_pct || 0))
+      .slice(0, MARKET_MOVE_MAX_ITEMS)
+    for (const idx of marketMoves) {
+      out.push({
+        type: 'market',
+        symbol: '',
+        name: idx.name,
+        market: idx.market,
+        change_pct: idx.change_pct,
+        signal: `${idx.change_pct && idx.change_pct >= 0 ? '大盘上涨' : '大盘下跌'} ${Math.abs(idx.change_pct || 0).toFixed(2)}%,关注对持仓/自选的影响`,
+      })
     }
     return out
-  }, [alertHits, urgent, localizedDiagnosticAlerts, opportunities])
+  }, [alertHits, urgent, localizedDiagnosticAlerts, indices])
 
   const candKey = useMemo(
     () => JSON.stringify(candidates),
@@ -524,8 +546,8 @@ export default function DashboardPage() {
           ) : (
             <div className="divide-y divide-border/40">
               {feed.map((it, i) => {
-                const badgeLabels: Record<string, string> = { alert: dashboardT('dashboard.feed.alert'), holding: dashboardT('dashboard.feed.holding'), watch: dashboardT('dashboard.feed.watch'), risk: dashboardT('dashboard.feed.risk'), opportunity: dashboardT('dashboard.feed.opportunity') }
-                const badgeClasses: Record<string, string> = { alert: 'bg-rose-500/15 text-rose-500', holding: 'bg-emerald-500/15 text-emerald-500', watch: 'bg-accent text-muted-foreground', risk: 'bg-amber-500/15 text-amber-600', opportunity: 'bg-primary/10 text-primary' }
+                const badgeLabels: Record<string, string> = { alert: dashboardT('dashboard.feed.alert'), holding: dashboardT('dashboard.feed.holding'), watch: dashboardT('dashboard.feed.watch'), risk: dashboardT('dashboard.feed.risk'), opportunity: dashboardT('dashboard.feed.opportunity'), market: dashboardT('dashboard.feed.market') }
+                const badgeClasses: Record<string, string> = { alert: 'bg-rose-500/15 text-rose-500', holding: 'bg-emerald-500/15 text-emerald-500', watch: 'bg-accent text-muted-foreground', risk: 'bg-amber-500/15 text-amber-600', opportunity: 'bg-primary/10 text-primary', market: 'bg-sky-500/15 text-sky-500' }
                 const badge = { label: badgeLabels[it.type] || it.type, cls: badgeClasses[it.type] || 'bg-accent text-muted-foreground' }
                 return (
                   <div

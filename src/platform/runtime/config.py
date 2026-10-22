@@ -47,6 +47,22 @@ class Settings(BaseSettings):
     # 幂等窗口覆盖（JSON），示例: {"daily_report":720}
     notify_dedupe_ttl_overrides: str = ""
 
+    # ---- 持仓净盈亏费用模型（对齐券商含费口径；改 .env 后重启生效）----
+    # A 股：佣金默认万 2.5（单笔最低 5 元，双边）/ 印花税万 5（仅卖出，2023-08 起）/ 过户费 0.001%（双边）
+    fee_cn_commission_rate: float = 0.00025
+    fee_cn_min_commission: float = 5.0
+    fee_cn_stamp_duty_rate: float = 0.0005
+    fee_cn_transfer_fee_rate: float = 0.00001
+    # 港股：佣金默认万 8（最低 15 港元，双边）/ 印花税 0.1%（双边，2023-08 起）/ 交易费+征费约 0.0058%（双边）
+    fee_hk_commission_rate: float = 0.0008
+    fee_hk_min_commission: float = 15.0
+    fee_hk_stamp_duty_rate: float = 0.001
+    fee_hk_misc_fee_rate: float = 0.000058
+    # 美股：多数券商零佣金；misc 为 SEC 卖出手续费约 0.00278%（仅卖出）
+    fee_us_commission_rate: float = 0.0
+    fee_us_min_commission: float = 0.0
+    fee_us_misc_fee_rate: float = 0.0000278
+
     # SSL 证书（企业环境）
     ca_cert_file: str = ""
 
