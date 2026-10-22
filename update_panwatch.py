@@ -287,13 +287,14 @@ def start_server():
     env["PATH"] = str(PROJECT / ".gtk3" / "bin") + os.pathsep + env.get("PATH", "")
     with open(LOG, "a", encoding="utf-8") as fh:
         fh.write(f"\n===== update_panwatch 重启 {datetime.now():%Y-%m-%d %H:%M:%S} =====\n")
-        # CREATE_NEW_SESSION(0x40) 让服务进程脱离父会话/进程树，Bash 工具回收会话时不会被连带杀掉
-        subprocess.Popen(
-            [str(VENV_PY), "-m", "uvicorn", "server:app",
-             "--host", HOST, "--port", str(PORT)],
-            cwd=str(PROJECT), env=env, stdout=fh, stderr=subprocess.STDOUT,
-            creationflags=0x00000008 | 0x00000040, close_fds=True,
-        )
+    # 通过 cmd /c start 把 start_panwatch_bg.bat 派发到独立的控制台窗口，彻底脱离
+    # 父进程树；即便调用方（Bash/自动化）会话被回收，服务也继续运行（即用户日常自启方式）。
+    bat = str(PROJECT / "start_panwatch_bg.bat")
+    subprocess.Popen(
+        f'cmd /c start "" "{bat}"',
+        cwd=str(PROJECT), env=env, close_fds=True, shell=True,
+        creationflags=0x00000008,
+    )
 
 
 # ---------- 主流程 ----------
