@@ -287,11 +287,12 @@ def start_server():
     env["PATH"] = str(PROJECT / ".gtk3" / "bin") + os.pathsep + env.get("PATH", "")
     with open(LOG, "a", encoding="utf-8") as fh:
         fh.write(f"\n===== update_panwatch 重启 {datetime.now():%Y-%m-%d %H:%M:%S} =====\n")
+        # CREATE_NEW_SESSION(0x40) 让服务进程脱离父会话/进程树，Bash 工具回收会话时不会被连带杀掉
         subprocess.Popen(
             [str(VENV_PY), "-m", "uvicorn", "server:app",
              "--host", HOST, "--port", str(PORT)],
             cwd=str(PROJECT), env=env, stdout=fh, stderr=subprocess.STDOUT,
-            creationflags=0x00000008 | 0x00000200, close_fds=True,
+            creationflags=0x00000008 | 0x00000040, close_fds=True,
         )
 
 
