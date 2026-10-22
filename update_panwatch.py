@@ -62,8 +62,8 @@ MARKERS = [
 ]
 
 
-def log(msg=""):
-    print(msg, flush=True)
+def log(msg="", **kwargs):
+    print(msg, flush=True, **kwargs)
 
 
 def run(cmd, cwd=PROJECT, timeout=600, check=False, env=None):
