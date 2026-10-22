@@ -125,32 +125,51 @@ def pip_show_version(name: str):
 
 
 def filter_satisfied_git_deps(req_paths):
-    """剔除已按 pin 版本装好的 git+ 依赖。
+    """递归展开所有 requirements 文件（含嵌套 -r），剔除已按 pin 版本装好的 git+ 依赖。
 
-    pip 对 `pkg @ git+URL@tag` 这类 direct-URL 依赖会重复 clone，
-    而本机访问 github.com 必须走代理（直连不通），代理抽风时整步必失败。
-    已装好且版本与 pin 一致 → 无需再 clone。
-    返回 (临时 requirements 路径 or None, 被剔除的依赖说明列表)。
+    关键修正：
+      * 不再把嵌套 -r 写成绝对反斜杠路径——pip 的 requirements 解析器会把行内 `\\`
+        误判，导致 `D:\\Projects\\PanWatch\\requirements-runtime.txt` 被拆坏；改为把
+        嵌套文件**内联**进同一份扁平清单，彻底不出现 -r 行。
+      * tradingagents 之类 git+ 依赖若在 venv 中已按 pin 版本装好，则整行剔除；
+        否则它会被嵌套进来的 requirements-runtime.txt 重新引入并触发重 clone
+        （本机走代理访问 github 偶发 502）。
+    返回 (临时 requirements 路径 or None, 被剔除依赖说明列表)。
     """
     git_re = re.compile(r"^\s*([A-Za-z0-9_.\-]+)\s*@\s*git\+(\S+?)@([A-Za-z0-9_.\-]+)\s*(?:#.*)?$")
-    kept, dropped = [], []
-    for rp in req_paths:
-        base = Path(rp).resolve().parent
-        for line in Path(rp).read_text(encoding="utf-8").splitlines():
+    seen, kept, dropped = set(), [], []
+
+    def process(path):
+        p = Path(path).resolve()
+        if p in seen:
+            return
+        seen.add(p)
+        for line in p.read_text(encoding="utf-8").splitlines():
             m = git_re.match(line)
-            if not m:
-                # 嵌套 -r 引用改成绝对路径（pip 按清单文件所在目录解析相对路径）
-                mr = re.match(r"^\s*-r\s+(\S+)\s*$", line)
-                if mr and not Path(mr.group(1)).is_absolute():
-                    line = f"-r {(base / mr.group(1)).resolve()}"
-                kept.append(line)
+            if m:
+                name, ref = m.group(1), m.group(3)
+                ver = pip_show_version(name)
+                if ver and ver.lstrip("vV") == ref.lstrip("vV"):
+                    dropped.append(f"{name}=={ver}（已按 pin 装好，免 clone）")
+                else:
+                    kept.append(line)
                 continue
-            name, ref = m.group(1), m.group(3)
-            ver = pip_show_version(name)
-            if ver and ver.lstrip("vV") == ref.lstrip("vV"):
-                dropped.append(f"{name}=={ver}（已按 pin 装好，免 clone）")
-            else:
-                kept.append(line)
+            mr = re.match(r"^\s*-r\s+(\S+)\s*$", line)
+            if mr:
+                # 递归内联，不再写 -r 行（避免反斜杠解析 bug + 嵌套重新引入 git 依赖）
+                child = (p.parent / mr.group(1))
+                if not child.is_absolute():
+                    child = child.resolve()
+                process(child)
+                continue
+            if re.match(r"^\s*-e\s+", line):
+                # 可编辑本地包由脚本下方独立循环安装，避免重复构建
+                # （构建需 hatchling 等后端，离线 --no-index 下会失败）
+                continue
+            kept.append(line)
+
+    for rp in req_paths:
+        process(rp)
     if not dropped:
         return None, dropped
     tmp = PROJECT / "_req_filtered.txt"
@@ -363,8 +382,9 @@ def main():
                     return 1
                 log("  requirements 同步完成")
             for pkg in sorted((PROJECT / "packages").glob("*/pyproject.toml")):
-                rc, out = run([str(VENV_PY), "-m", "pip", "install", "-q", "-e", str(pkg.parent)],
-                              timeout=600)
+                # --no-build-isolation：复用 venv 内已装好的 hatchling，离线也能构建
+                rc, out = run([str(VENV_PY), "-m", "pip", "install", "-q", "--no-build-isolation",
+                               "-e", str(pkg.parent)], timeout=600)
                 if rc != 0:
                     log(f"[失败] editable 安装失败（{pkg.parent.name}），保持旧版本：\n{out[-800:]}")
                     return 1
