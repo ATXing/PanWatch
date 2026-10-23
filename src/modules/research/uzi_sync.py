@@ -338,6 +338,18 @@ def _ensure_table(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE uzi_reports ADD COLUMN dim_status_json TEXT")
     if "score_integrity_json" not in cols:
         conn.execute("ALTER TABLE uzi_reports ADD COLUMN score_integrity_json TEXT")
+    # UZI 综合分(0.6 基本面 + 0.4 评委共识)分项也是后加的:面板要能解释
+    # 「one-liner 写 49 分、上方写 61.2 分」的差异,必须把构成存下来
+    for col, typ in (
+        ("uzi_overall_score", "REAL"),
+        ("panel_consensus", "REAL"),
+        ("consensus_valid", "INTEGER"),
+        ("verdict_detail", "VARCHAR"),
+        ("verdict_label", "VARCHAR"),
+        ("panel_active", "INTEGER"),
+    ):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE uzi_reports ADD COLUMN {col} {typ}")
 
 
 def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
@@ -380,6 +392,27 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
             shutil.copyfile(src, dst)
             html_path = dst
 
+    # UZI 自己的 "综合分" 与基本面分是两个数,必须分开存:
+    # synthesis.overall_score = 0.6*基本面 + 0.4*66 位流派评委共识(score_fns.py:1052),
+    # 所以 one-liner 里的「体检结果 xx 分」既不是 fundamental_score 也不是 real_score。
+    synth_path = os.path.join(cache, "synthesis.json")
+    synth = json.load(open(synth_path, encoding="utf-8")) if os.path.exists(synth_path) else {}
+    uzi_overall = synth.get("overall_score")
+    panel_consensus = synth.get("panel_consensus")
+    consensus_valid = synth.get("consensus_valid")
+    verdict_detail = synth.get("verdict_detail")
+    verdict_label = synth.get("verdict_label")
+    # 有效评委人数：synthesis 没存，panel.json 的 signal_distribution 里有
+    panel_active = None
+    panel_path = os.path.join(cache, "panel.json")
+    if os.path.exists(panel_path):
+        try:
+            dist = (json.load(open(panel_path, encoding="utf-8")) or {}).get("signal_distribution") or {}
+            n = sum(int(dist.get(k) or 0) for k in ("bullish", "neutral", "bearish"))
+            panel_active = n or None
+        except Exception:
+            panel_active = None
+
     conn = sqlite3.connect(db_path)
     try:
         _ensure_table(conn)
@@ -388,8 +421,10 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
             INSERT INTO uzi_reports
                 (symbol, market, ticker_raw, tier, as_of_date, fundamental_score,
                  one_liner, coverage_pct, dimensions_json, dim_status_json,
-                 score_integrity_json, report_dir, html_path, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                 score_integrity_json, report_dir, html_path,
+                 uzi_overall_score, panel_consensus, consensus_valid,
+                 verdict_detail, verdict_label, panel_active, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
             ON CONFLICT(symbol, market) DO UPDATE SET
                 ticker_raw=excluded.ticker_raw,
                 tier=excluded.tier,
@@ -402,6 +437,12 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                 score_integrity_json=excluded.score_integrity_json,
                 report_dir=excluded.report_dir,
                 html_path=excluded.html_path,
+                uzi_overall_score=excluded.uzi_overall_score,
+                panel_consensus=excluded.panel_consensus,
+                consensus_valid=excluded.consensus_valid,
+                verdict_detail=excluded.verdict_detail,
+                verdict_label=excluded.verdict_label,
+                panel_active=excluded.panel_active,
                 created_at=CURRENT_TIMESTAMP
             """,
             (
@@ -418,6 +459,12 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                 json.dumps(score_integrity, ensure_ascii=False),
                 rdir or "",
                 html_path,
+                uzi_overall,
+                panel_consensus,
+                None if consensus_valid is None else (1 if consensus_valid else 0),
+                verdict_detail,
+                verdict_label,
+                panel_active,
             ),
         )
         conn.commit()
@@ -436,6 +483,10 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
         "real_dims": score_integrity.get("real_dims"),
         "total_dims": score_integrity.get("total_dims"),
         "trusted": score_integrity.get("trusted"),
+        "uzi_overall_score": uzi_overall,
+        "panel_consensus": panel_consensus,
+        "panel_active": panel_active,
+        "verdict_label": verdict_label,
     }
 
 

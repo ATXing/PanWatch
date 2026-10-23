@@ -130,8 +130,17 @@ export interface UziReport {
   market?: string
   tier?: string
   as_of_date?: string
-  /** UZI 原始综合分：含占位分与未采集的默认分，不能当实测结论 */
+  /** UZI 的 19 维基本面加权分：含 7 个固定占位分与未采集的默认分 */
   fundamental_score?: number
+  /** UZI 自己的综合分 = 基本面×0.6 + 评委共识×0.4（one-liner 的「体检结果 x 分」就是它） */
+  uzi_overall_score?: number | null
+  /** 66 位投资流派评委压出来的共识分（0–100） */
+  panel_consensus?: number | null
+  /** 本次真正投票的评委人数（其余 skip 未表态） */
+  panel_active?: number | null
+  consensus_valid?: boolean | null
+  verdict_detail?: string
+  verdict_label?: string
   /** 只用实测维度重算的分（real_score 不可信时为 null） */
   real_score?: number | null
   trusted?: boolean

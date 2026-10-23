@@ -37,7 +37,8 @@ def _fetch_row(symbol: str, market: str):
             """
             SELECT symbol, market, tier, as_of_date, fundamental_score,
                    one_liner, coverage_pct, dimensions_json, html_path, dim_status_json,
-                   score_integrity_json
+                   score_integrity_json, uzi_overall_score, panel_consensus,
+                   consensus_valid, verdict_detail, verdict_label, panel_active
             FROM uzi_reports WHERE symbol=? AND market=?
             """,
             (symbol, market),
@@ -109,6 +110,12 @@ def get_uzi_report(symbol: str, market: str, db: Session = Depends(get_db)):
         html_path,
         dim_status_json,
         integrity_json,
+        uzi_overall,
+        panel_consensus,
+        consensus_valid,
+        verdict_detail,
+        verdict_label,
+        panel_active,
     ) = row
     dims = json.loads(dims_json) if dims_json else {}
     dim_status = json.loads(dim_status_json) if dim_status_json else {}
@@ -121,6 +128,13 @@ def get_uzi_report(symbol: str, market: str, db: Session = Depends(get_db)):
         "as_of_date": as_of,
         "fundamental_score": score,
         "real_score": integrity.get("real_score"),
+        # UZI 的综合分(=0.6 基本面 + 0.4 评委共识)与其构成,用来解释 one-liner 的「体检结果 x 分」
+        "uzi_overall_score": uzi_overall,
+        "panel_consensus": panel_consensus,
+        "panel_active": panel_active,
+        "consensus_valid": None if consensus_valid is None else bool(consensus_valid),
+        "verdict_detail": verdict_detail,
+        "verdict_label": verdict_label,
         "trusted": integrity.get("trusted"),
         "score_integrity": integrity,
         "one_liner": one_liner,

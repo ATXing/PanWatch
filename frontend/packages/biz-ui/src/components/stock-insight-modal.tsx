@@ -2367,9 +2367,13 @@ function UziReportSection({
           {report?.fundamental_score != null && (
             <span
               className="text-[10px] text-muted-foreground/75"
-              title="UZI 原始综合分：把固定占位分和未采集的默认分一起加权，不能当实测结论看"
+              title="UZI 的 19 维基本面加权分：含 7 个固定占位分（宏观/行业/原材料/期货/政策/护城河/杀猪盘）与未采集维度的默认分"
             >
-              （UZI 原分 {report.fundamental_score}，含无依据项）
+              （UZI 基本面 {report.fundamental_score}
+              {report.uzi_overall_score != null && report.panel_consensus != null
+                ? ` · 综合 ${report.uzi_overall_score} = 基本面 × 0.6 + 评委共识 ${report.panel_consensus} × 0.4`
+                : ''}
+              ）
             </span>
           )}
           {report?.field_coverage_pct != null && (
@@ -2593,8 +2597,22 @@ function UziReportSection({
           <div className="text-[10px] text-muted-foreground leading-relaxed">
             末行「🟢 安全」是下方第 18 项「杀猪盘扫描」的结论，不是买卖建议。
             <br />
-            这段是 UZI 原文，其中「体检结果 xx 分」按全口径加权（含占位分与未采集的默认分），
-            与上方实测口径的分数不是同一个数，请以上方为准。
+            这段是 UZI 原文。
+            {report?.uzi_overall_score != null &&
+            report?.fundamental_score != null &&
+            report?.panel_consensus != null ? (
+              <>
+                其中「体检结果 {Math.trunc(report.uzi_overall_score)} 分」是 UZI 的<b>综合分</b> = 基本面{' '}
+                {report.fundamental_score} × 0.6 + 流派评委共识 {report.panel_consensus} × 0.4
+                {report.verdict_label ? `（${report.verdict_label}）` : ''}
+                ，评委共识是
+                {report.panel_active ? `${report.panel_active} 位有效评委投票压出来的主观分` : '评委投票压出来的主观分'}
+                ，会把基本面分往上或往下拖；
+              </>
+            ) : (
+              <>其中「体检结果 x 分」是 UZI 的综合分（基本面加权 + 评委投票），</>
+            )}
+            上方大字只统计真有采集数据的维度，两者口径不同，判断以上方为准。
           </div>
         </div>
       )}
