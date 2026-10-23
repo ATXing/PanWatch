@@ -179,10 +179,46 @@ def _is_missing(v) -> bool:
 
 
 def _has_content(data) -> bool:
-    """该维度是否真的采到了内容（任一子字段有非空值）。"""
+    """该维度是否真的采到了内容（任一子字段有非空值）。
+
+    查询词/开关类字段不算内容：它们的非空只说明「打算去搜」，不说明「搜到了」。
+    """
     if not isinstance(data, dict):
         return False
-    return any(not _is_missing(v) for v in data.values())
+    return any(
+        not _is_missing(v) for k, v in data.items() if k not in _NON_CONTENT_KEYS
+    )
+
+
+# data 里「不是采集结果」的字段：查询词、开关、给 agent 的提示
+_NON_CONTENT_KEYS = {
+    "qualitative_search",
+    "web_search_queries",
+    "web_search_snippets_query",
+    "needs_web_search",
+    "fallback_queries",
+    "dynamic_snippets",
+}
+
+
+# 有些维度的 data 里混着「要 agent 去搜的查询词」和「真实采集结果」。
+# 只看"有任何一个字段非空"会把查询词当成数据 —— 李宁 11_governance 的
+# data 就是 {"pledge": [], "insider_trades_1y": [], "qualitative_search": [...查询词]}，
+# 两项真数据全空却被判 ok，标签还显示「质押记录 0」——把「没拿到」写成了「没有」。
+# 所以：这些维度必须「核心结果字段」里至少一项有内容才算采到。
+_CORE_FIELDS: dict[str, tuple[str, ...]] = {
+    "4_peers": ("peer_table", "peer_comparison"),
+    "5_chain": ("main_business_breakdown", "ths_zyjs", "products"),
+    "11_governance": ("pledge", "insider_trades_1y"),
+    "15_events": ("recent_notices", "event_timeline", "recent_news"),
+    "19_contests": ("xueqiu_cubes", "tgb_mentions", "dpswang"),
+}
+# 核心字段全空时给的具体说明（不写会误导成「真的没有」）
+_CORE_EMPTY_NOTE = {
+    "11_governance": "港股没有 A 股的股权质押/高管持股接口，本次两个核心字段全空——这是「没拿到」，不是「0 质押 / 无内部交易」",
+    "4_peers": "没拿到港股同行名单（UZI 自己注明需走 AASTOCKS/问财），不是「行业里没有可比公司」",
+    "5_chain": "没拿到主营构成（fetch_chain 只写了 A 股分支），不是「公司没有业务拆分」",
+}
 
 
 
@@ -197,6 +233,15 @@ def _dim_status(dims: dict, raw_dims: dict) -> dict[str, dict]:
         raw = raw_dims.get(key)
         # 「有数据」必须是 data 里真有非空值:data={} 或 {"a": None} 都不算
         has_raw = isinstance(raw, dict) and _has_content(raw.get("data"))
+        # 核心字段闸门:只有查询词/辅助字段不算采到
+        core = _CORE_FIELDS.get(key)
+        if core is not None:
+            data = (raw or {}).get("data") if isinstance(raw, dict) else None
+            has_core = isinstance(data, dict) and any(
+                not _is_missing(data.get(f)) for f in core
+            )
+            if not has_core:
+                has_raw = False
         fallback = isinstance(raw, dict) and raw.get("fallback") is True
 
         if weight == 0:
@@ -215,7 +260,10 @@ def _dim_status(dims: dict, raw_dims: dict) -> dict[str, dict]:
             # 打分层写死固定分,即便 raw 里有兜底文本也不算实测
             out[key] = {"status": "stub", "note": "UZI 此项为固定占位分，不随标的改变"}
         elif not has_raw:
-            out[key] = {"status": "none", "note": "本次未采集，分数为默认值"}
+            out[key] = {
+                "status": "none",
+                "note": _CORE_EMPTY_NOTE.get(key, "本次未采集，分数为默认值"),
+            }
         elif fallback or any(s in label for s in _NO_DATA_LABELS):
             out[key] = {"status": "weak", "note": "兜底/推断值，无实测依据"}
         else:
@@ -383,14 +431,20 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
             as_of = suffix
 
     # 复制 standalone HTML 到本地静态目录(覆盖写,固定文件名)
+    # 复制失败不能让整只票的同步失败:HTML 只是「查看完整报告」用的附件,
+    # 分数/维度才是主数据(实测被占用/杀软锁文件时 copyfile 会 PermissionError)
     html_path = ""
     if rdir:
         src = os.path.join(rdir, "full-report-standalone.html")
         if os.path.exists(src):
-            os.makedirs(UZI_HTML_DIR, exist_ok=True)
-            dst = os.path.join(UZI_HTML_DIR, f"{ticker}.html")
-            shutil.copyfile(src, dst)
-            html_path = dst
+            try:
+                os.makedirs(UZI_HTML_DIR, exist_ok=True)
+                dst = os.path.join(UZI_HTML_DIR, f"{ticker}.html")
+                shutil.copyfile(src, dst)
+                html_path = dst
+            except Exception as e:
+                print(f"  [warn] {ticker} HTML 副本写入失败(忽略): {type(e).__name__}: {e}")
+                html_path = ""
 
     # UZI 自己的 "综合分" 与基本面分是两个数,必须分开存:
     # synthesis.overall_score = 0.6*基本面 + 0.4*66 位流派评委共识(score_fns.py:1052),
