@@ -340,6 +340,8 @@ export default function StockInsightModal(props: {
   market: string
   stockName?: string
   hasPosition?: boolean
+  /** 打开时直接定位到某个 tab(如从列表的 UZI 标签一键进来) */
+  initialTab?: InsightTab
 }) {
   const { toast } = useToast()
   const { palette } = useMarketColors()
@@ -389,6 +391,8 @@ export default function StockInsightModal(props: {
   const [deepHistory, setDeepHistory] = useState<HistoryComparisonResponse | null>(null)
   const [deepHistoryLoading, setDeepHistoryLoading] = useState(false)
   const [uziReport, setUziReport] = useState<UziReport | null>(null)
+  // 从列表「UZI xx」标签进来时置 true：真实报告到手后再切到 UZI tab,避免先渲染空 tab
+  const pendingUziTabRef = useRef(false)
   const [klineInterval] = useState<'1d' | '1w' | '1m'>('1d')
   const [alerting, setAlerting] = useState(false)
   const [watchingStock, setWatchingStock] = useState<StockItem | null>(null)
@@ -707,10 +711,14 @@ export default function StockInsightModal(props: {
     if (!symbol) return
     try {
       const r = await insightApi.uziReport<UziReport>(symbol, market)
-      setUziReport(r && r.exists ? r : null)
+      const rep = r && r.exists ? r : null
+      setUziReport(rep)
+      // 列表标签进来:确有报告才切 tab;没有就留在概览
+      if (rep && pendingUziTabRef.current) setTab('uzi')
     } catch {
       setUziReport(null)
     } finally {
+      pendingUziTabRef.current = false
     }
   }, [symbol, market])
 
@@ -726,7 +734,9 @@ export default function StockInsightModal(props: {
 
   useEffect(() => {
     if (!props.open || !symbol) return
-    setTab('overview')
+    // initialTab='uzi' 时先停概览,UZI 报告加载完再切过去(见 loadUzi)
+    pendingUziTabRef.current = props.initialTab === 'uzi'
+    setTab(props.initialTab && props.initialTab !== 'uzi' ? props.initialTab : 'overview')
     setSuggestions([])
     setNews([])
     setAnnouncements([])

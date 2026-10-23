@@ -70,6 +70,9 @@ export const insightApi = {
   uziReport: <T>(symbol: string, market: string) =>
     fetchAPI<T>(`/uzi/report?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}`),
 
+  /** 列表页用:一次拿到所有已有 UZI 报告的摘要 */
+  uziList: <T>() => fetchAPI<T>('/uzi/list'),
+
   uziResync: <T>(symbol: string, market: string) =>
     fetchAPI<T>(`/uzi/resync?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}`, {
       method: 'POST',
@@ -101,6 +104,18 @@ export interface UziReport {
   coverage_pct?: number
   dimensions?: Record<string, UziDimension>
   dim_status?: Record<string, UziDimStatus>
+  html_available?: boolean
+}
+
+/** /uzi/list 摘要项：用于列表页「UZI xx」标签 */
+export interface UziListItem {
+  symbol: string
+  market: string
+  tier?: string
+  as_of_date?: string
+  fundamental_score?: number
+  one_liner?: string
+  coverage_pct?: number
   html_available?: boolean
 }
 

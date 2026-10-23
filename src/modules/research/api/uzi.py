@@ -44,6 +44,42 @@ def _fetch_row(symbol: str, market: str):
         conn.close()
 
 
+@router.get("/list")
+def list_uzi_reports():
+    """列表页用:一次返回所有已有 UZI 报告的摘要(不含维度明细)。
+
+    前端据此在股票名后打「UZI xx」标签,避免每行单独请求。
+    """
+    conn = sqlite3.connect(_PANWATCH_DB)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT symbol, market, tier, as_of_date, fundamental_score,
+                   one_liner, coverage_pct, html_path
+            FROM uzi_reports
+            ORDER BY as_of_date DESC
+            """
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    items = [
+        {
+            "symbol": r[0],
+            "market": r[1],
+            "tier": r[2],
+            "as_of_date": r[3],
+            "fundamental_score": r[4],
+            "one_liner": r[5],
+            "coverage_pct": r[6],
+            "html_available": bool(r[7] and os.path.exists(r[7])),
+        }
+        for r in rows
+    ]
+    return {"count": len(items), "items": items}
+
+
 @router.get("/report")
 def get_uzi_report(symbol: str, market: str, db: Session = Depends(get_db)):
     row = _fetch_row(symbol, market)

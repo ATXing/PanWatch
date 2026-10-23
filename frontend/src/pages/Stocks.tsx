@@ -2,7 +2,7 @@ import { useConfirm } from '@panwatch/base-ui/components/ui/confirm-dialog'
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Plus, Trash2, Pencil, Search, X, TrendingUp, Bot, Play, RefreshCw, Wallet, PiggyBank, ArrowUpRight, ArrowDownRight, Building2, ChevronDown, ChevronRight, Cpu, Bell, Clock, Newspaper, ExternalLink, BarChart3, Brain } from 'lucide-react'
-import { fetchAPI, stocksApi, type AIService, type NotifyChannel } from '@panwatch/api'
+import { fetchAPI, stocksApi, insightApi, type AIService, type NotifyChannel, type UziListItem } from '@panwatch/api'
 import { klinesApi } from '@panwatch/api/klines'
 import { useLocalStorage, formatDateTime } from '@/lib/utils'
 import {
@@ -35,6 +35,48 @@ import { marketSignTextClass } from '@/lib/market-colors'
 import { parseAssistantPortfolioTarget } from '@/lib/assistant-navigation'
 import { useGuidedTour } from '@/components/onboarding/GuidedTour'
 import FirstAnalysis from '@/components/onboarding/FirstAnalysis'
+
+/**
+ * 股票名后的「UZI xx」标签:只有做过 UZI 调研的股票才有,点击直接进 UZI 调研 tab。
+ * UZI 是排雷/尽调结论,不是涨跌信号,故不用红绿配色(避免与涨跌语义混淆)。
+ */
+function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
+  const score = typeof info.fundamental_score === 'number' ? info.fundamental_score : null
+  const toneCls =
+    score == null
+      ? 'bg-accent text-muted-foreground'
+      : score >= 70
+        ? 'bg-violet-500/15 text-violet-600 dark:text-violet-300'
+        : score >= 60
+          ? 'bg-violet-500/10 text-violet-600 dark:text-violet-300'
+          : 'bg-amber-500/15 text-amber-600 dark:text-amber-300'
+  const fmtDate = (d?: string) =>
+    d && /^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d || ''
+  const brief = (info.one_liner || '').split('\n')[0].replace(/🟢\s*/g, '').trim()
+  const tip = [
+    `UZI 调研${info.tier ? ` · ${info.tier} 档` : ''}${info.as_of_date ? ` · ${fmtDate(info.as_of_date)}` : ''}`,
+    info.coverage_pct != null ? `数据覆盖 ${Number(info.coverage_pct).toFixed(0)}%` : '',
+    brief,
+    '点击进入 UZI 调研结果页',
+  ]
+    .filter(Boolean)
+    .join('\n')
+  return (
+    <button
+      type="button"
+      title={tip}
+      onClick={(e) => {
+        e.stopPropagation()
+        e.preventDefault()
+        onOpen()
+      }}
+      className={`shrink-0 align-middle ml-1.5 mr-1.5 inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-medium leading-none transition-colors hover:brightness-110 ${toneCls}`}
+    >
+      <span className="opacity-70">UZI</span>
+      {score != null && <span className="font-mono">{score.toFixed(1)}</span>}
+    </button>
+  )
+}
 
 interface AgentResult {
   success?: boolean
@@ -256,6 +298,10 @@ export default function StocksPage() {
   const [insightMarket, setInsightMarket] = useState('CN')
   const [insightName, setInsightName] = useState<string | undefined>(undefined)
   const [insightHasPosition, setInsightHasPosition] = useState(false)
+  // 打开洞察弹窗时直接落在哪个 tab(从列表「UZI xx」标签一键进来用)
+  const [insightInitialTab, setInsightInitialTab] = useState<'uzi' | undefined>(undefined)
+  // UZI 调研摘要:key = `${symbol}|${market}`,一次拉全量,不在每行单独请求
+  const [uziMap, setUziMap] = useState<Record<string, UziListItem>>({})
 
   // Market status
   const [marketStatus, setMarketStatus] = useState<MarketStatus[]>([])
@@ -753,12 +799,41 @@ export default function StocksPage() {
   }, [loadNews])
 
   const openStockDetail = useCallback((stockSymbol: string, stockMarket: string, stockName?: string, hasPosition?: boolean) => {
+    setInsightInitialTab(undefined)
     setInsightSymbol(stockSymbol)
     setInsightMarket(stockMarket || 'CN')
     setInsightName(stockName)
     setInsightHasPosition(!!hasPosition)
     setInsightOpen(true)
   }, [])
+
+  // 点「UZI xx」标签:打开同一个洞察弹窗,直接落在 UZI 调研 tab
+  const openUziReport = useCallback((stockSymbol: string, stockMarket: string, stockName?: string, hasPosition?: boolean) => {
+    setInsightSymbol(stockSymbol)
+    setInsightMarket(stockMarket || 'CN')
+    setInsightName(stockName)
+    setInsightHasPosition(!!hasPosition)
+    setInsightInitialTab('uzi')
+    setInsightOpen(true)
+  }, [])
+
+  // 拉一次 UZI 摘要(全量几十条,很轻),失败静默——没有标签不影响主流程
+  const loadUziMap = useCallback(async () => {
+    try {
+      const r = await insightApi.uziList<{ count: number; items: UziListItem[] }>()
+      const map: Record<string, UziListItem> = {}
+      for (const it of r?.items || []) {
+        map[`${it.symbol}|${it.market}`] = it
+      }
+      setUziMap(map)
+    } catch {
+      /* 忽略:UZI 端点不可用时列表照常工作 */
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadUziMap()
+  }, [loadUziMap])
 
   const formatPreviewTime = (iso: string): string => {
     try {
@@ -1928,6 +2003,10 @@ export default function StocksPage() {
                                       {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
                                     </button>
                                     {(() => {
+                                      const uzi = uziMap[`${pos.symbol}|${pos.market}`]
+                                      return uzi ? <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} /> : null
+                                    })()}
+                                    {(() => {
                                       const { suggestion, kline } = getSuggestionForStock(pos.symbol, pos.market)
                                       return (suggestion || kline) ? (
                                         <span className="ml-2">
@@ -2105,6 +2184,10 @@ export default function StocksPage() {
                                     {pos.name}
                                     {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
                                   </button>
+                                  {(() => {
+                                    const uzi = uziMap[`${pos.symbol}|${pos.market}`]
+                                    return uzi ? <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} /> : null
+                                  })()}
                                   {pos.trading_style && (
                                     <span className={`shrink-0 text-[9px] px-1 py-0.5 rounded ${pos.trading_style === 'short' ? 'bg-rose-500/10 text-rose-600' : pos.trading_style === 'long' ? 'bg-blue-500/10 text-blue-600' : 'bg-amber-500/10 text-amber-600'}`}>
                                       {pos.trading_style === 'short' ? stockT('stocksPage.messages.shortStyleLabel') : pos.trading_style === 'long' ? stockT('stocksPage.messages.longStyleLabel') : stockT('stocksPage.messages.swingStyleLabel')}
@@ -2347,6 +2430,10 @@ export default function StocksPage() {
                             {stock.name}
                             {stock.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
                           </button>
+                          {(() => {
+                            const uzi = uziMap[`${stock.symbol}|${stock.market}`]
+                            return uzi ? <UziTag info={uzi} onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} /> : null
+                          })()}
                         </div>
                       </div>
                       <div className="text-right">
@@ -2475,6 +2562,7 @@ export default function StocksPage() {
         market={insightMarket}
         stockName={insightName}
         hasPosition={insightHasPosition}
+        initialTab={insightInitialTab}
       />
 
       {/* TradingAgents 深度分析弹窗 */}
