@@ -2563,6 +2563,7 @@ export default function StocksPage() {
         stockName={insightName}
         hasPosition={insightHasPosition}
         initialTab={insightInitialTab}
+        onUziUpdated={loadUziMap}
       />
 
       {/* TradingAgents 深度分析弹窗 */}

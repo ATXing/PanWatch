@@ -8,6 +8,7 @@ import {
   tradingAgentsApi,
   type DeepAnalysisResult,
   type HistoryComparisonResponse,
+  type UziJob,
   type UziReport,
 } from '@panwatch/api'
 import { getMarketBadge } from '@panwatch/biz-ui'
@@ -342,6 +343,8 @@ export default function StockInsightModal(props: {
   hasPosition?: boolean
   /** 打开时直接定位到某个 tab(如从列表的 UZI 标签一键进来) */
   initialTab?: InsightTab
+  /** UZI 重新调研完成后回调：列表页据此刷新「UZI xx」标签 */
+  onUziUpdated?: () => void
 }) {
   const { toast } = useToast()
   const { palette } = useMarketColors()
@@ -1794,6 +1797,7 @@ export default function StockInsightModal(props: {
                 symbol={symbol}
                 market={market}
                 onResync={handleUziResync}
+                onDataChanged={props.onUziUpdated}
               />
             )}
 
@@ -2173,13 +2177,99 @@ function UziReportSection({
   symbol,
   market,
   onResync,
+  onDataChanged,
 }: {
   report: UziReport
   symbol: string
   market: string
   onResync: () => void
+  /** 调研成功后的额外回调（列表页刷新「UZI xx」标签） */
+  onDataChanged?: () => void
 }) {
   const [resyncing, setResyncing] = useState(false)
+  const [job, setJob] = useState<UziJob | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [jobError, setJobError] = useState('')
+  const [showLog, setShowLog] = useState(false)
+  const [tier, setTier] = useState<string>(report.tier === 'lite' ? 'lite' : 'medium')
+  // 同一个 job_id 只触发一次刷新，避免轮询把 onResync 刷爆
+  const refreshedJobRef = useRef<string | null>(null)
+  const prevScoreRef = useRef<number | null>(report.fundamental_score ?? null)
+
+  // 进面板先问一次：上次发起的调研可能还在后台跑
+  useEffect(() => {
+    let alive = true
+    insightApi
+      .uziJob<{ exists: boolean; job?: UziJob }>(symbol, market, 20)
+      .then((r) => {
+        if (alive && r.exists && r.job) setJob(r.job)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [symbol, market])
+
+  const jobRunning = !!job?.running
+
+  // 运行中：3 秒轮询
+  useEffect(() => {
+    if (!jobRunning) return
+    let alive = true
+    const id = window.setInterval(async () => {
+      try {
+        const r = await insightApi.uziJob<{ exists: boolean; job?: UziJob }>(symbol, market, 0)
+        if (alive && r.exists && r.job) setJob(r.job)
+      } catch {
+        /* 网络抖动忽略，下一轮再试 */
+      }
+    }, 3000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [jobRunning, symbol, market])
+
+  // 成功：拉最新报告 + 通知列表页更新标签（只做一次）
+  useEffect(() => {
+    if (job?.status !== 'success' || !job.job_id) return
+    if (refreshedJobRef.current === job.job_id) return
+    refreshedJobRef.current = job.job_id
+    void onResync()
+    onDataChanged?.()
+  }, [job?.status, job?.job_id, onResync, onDataChanged])
+
+  // 失败：补一次日志尾部，供排查
+  useEffect(() => {
+    if ((job?.status !== 'failed' && job?.status !== 'interrupted') || !job.job_id) return
+    if (job.log_tail && job.log_tail.length > 0) return
+    let alive = true
+    insightApi
+      .uziJob<{ exists: boolean; job?: UziJob }>(symbol, market, 40)
+      .then((r) => {
+        if (alive && r.job) setJob(r.job)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [job?.status, job?.job_id, symbol, market])
+
+  const startAnalyze = async () => {
+    setStarting(true)
+    setJobError('')
+    prevScoreRef.current = report.fundamental_score ?? null
+    try {
+      const r = await insightApi.uziAnalyze<{ ok: boolean; job: UziJob }>(symbol, market, tier)
+      if (r?.job) setJob(r.job)
+      setConfirmOpen(false)
+    } catch (e) {
+      setJobError(e instanceof Error ? e.message : '发起调研失败')
+    } finally {
+      setStarting(false)
+    }
+  }
 
   const handleResync = async () => {
     setResyncing(true)
@@ -2237,14 +2327,28 @@ function UziReportSection({
         </div>
         <div className="flex items-center gap-2">
           <Button
+            size="sm"
+            className="h-7 px-2.5 text-[11px]"
+            onClick={() => {
+              setConfirmOpen((v) => !v)
+              setJobError('')
+            }}
+            disabled={jobRunning || starting}
+            title="联网重跑一次 UZI 调研，完成后自动刷新本页"
+          >
+            <Sparkles className={`w-3.5 h-3.5 mr-1 ${jobRunning ? 'animate-pulse' : ''}`} />
+            {jobRunning ? '调研中…' : '重新调研'}
+          </Button>
+          <Button
             variant="ghost"
             size="sm"
             className="h-7 px-2 text-[11px]"
             onClick={handleResync}
-            disabled={resyncing}
+            disabled={resyncing || jobRunning}
+            title="只从磁盘重读已有产出，不重新跑 UZI"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${resyncing ? 'animate-spin' : ''}`} />
-            重新同步
+            仅同步
           </Button>
           {report.html_available && (
             <Button
@@ -2260,6 +2364,119 @@ function UziReportSection({
           )}
         </div>
       </div>
+
+      {confirmOpen && !jobRunning && (
+        <div className="card p-3 space-y-2 border border-primary/30">
+          <div className="text-[12px] font-medium">
+            重新调研 {symbol}？会真跑一次 UZI（联网抓数据 + 多评委打分，读完自动刷新）
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] text-muted-foreground">档位</span>
+            {(
+              [
+                ['lite', 'lite · 快（约 3–6 分钟，7 维采集）'],
+                ['medium', 'medium · 全维度（约 6–15 分钟，20 维 + 联网搜索）'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setTier(value)}
+                className={`text-[11px] px-2 py-1 rounded-md border transition-colors ${
+                  tier === value
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-foreground/70 hover:bg-accent'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="text-[10px] text-muted-foreground leading-relaxed">
+            会强制重抓数据（不复用上一次缓存），所以比「仅同步」慢。
+            deep 档要求 agent 介入 66 评委角色扮演，后台一键跑出来的 deep 产物不完整，故未开放。
+            调研期间可以关闭弹窗，任务仍在服务端跑完；重新打开会接着显示进度。
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button size="sm" className="h-7 px-3 text-[11px]" onClick={startAnalyze} disabled={starting}>
+              {starting ? '正在启动…' : '开始调研'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => setConfirmOpen(false)}
+              disabled={starting}
+            >
+              取消
+            </Button>
+            {jobError && <span className="text-[11px] text-rose-600">{jobError}</span>}
+          </div>
+        </div>
+      )}
+
+      {job && (job.status === 'running' || job.status === 'success' || job.status === 'failed' || job.status === 'interrupted') && (
+        <div
+          className={`card p-2.5 text-[11px] leading-relaxed ${
+            job.status === 'running'
+              ? 'border border-primary/30 bg-primary/5'
+              : job.status === 'success'
+                ? 'border border-emerald-500/30 bg-emerald-500/5'
+                : 'border border-rose-500/30 bg-rose-500/5'
+          }`}
+        >
+          {job.status === 'running' && (
+            <div className="flex items-center gap-1.5 flex-wrap text-foreground/85">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary shrink-0" />
+              <span className="font-medium">UZI 调研中</span>
+              <span className="text-muted-foreground">已 {fmtElapsed(job.elapsed_sec)}</span>
+              {job.phase && <span className="text-muted-foreground">· {job.phase}</span>}
+              {typeof job.done_dims === 'number' && job.done_dims > 0 && (
+                <span className="text-muted-foreground">· 已完成 {job.done_dims} 个维度</span>
+              )}
+              <span className="text-muted-foreground">
+                · {job.tier}档 · 约 {job.tier === 'lite' ? '3–6' : '6–15'} 分钟
+              </span>
+            </div>
+          )}
+          {job.status === 'success' && (
+            <div className="flex items-center gap-1.5 flex-wrap text-emerald-700 dark:text-emerald-400">
+              <span className="font-medium">调研完成，数据已刷新</span>
+              {job.result?.fundamental_score != null && (
+                <span className="font-mono">
+                  {prevScoreRef.current != null && prevScoreRef.current !== job.result.fundamental_score
+                    ? `库内加权分 ${prevScoreRef.current} → ${job.result.fundamental_score}`
+                    : `库内加权分 ${job.result.fundamental_score}`}
+                </span>
+              )}
+              {job.result?.coverage_pct != null && (
+                <span className="text-muted-foreground">· 覆盖 {job.result.coverage_pct}%</span>
+              )}
+              {job.elapsed_sec != null && <span className="text-muted-foreground">· 用时 {fmtElapsed(job.elapsed_sec)}</span>}
+            </div>
+          )}
+          {(job.status === 'failed' || job.status === 'interrupted') && (
+            <div className="flex items-start gap-1.5 flex-wrap text-rose-700 dark:text-rose-400">
+              <span className="font-medium">{job.status === 'interrupted' ? '调研中断' : '调研失败'}</span>
+              <span className="text-foreground/70">{job.error || '未知原因'}</span>
+              {job.log_tail && job.log_tail.length > 0 && (
+                <button
+                  type="button"
+                  className="underline text-[10px] text-foreground/60"
+                  onClick={() => setShowLog((v) => !v)}
+                >
+                  {showLog ? '收起日志' : '看日志'}
+                </button>
+              )}
+            </div>
+          )}
+          {showLog && job.log_tail && job.log_tail.length > 0 && (
+            <pre className="mt-1.5 max-h-40 overflow-auto rounded bg-background/70 p-2 text-[10px] leading-snug whitespace-pre-wrap break-all text-foreground/70">
+              {job.log_tail.join('\n')}
+            </pre>
+          )}
+        </div>
+      )}
 
       {oneLiner && (
         <div className="space-y-1">
@@ -2328,7 +2545,8 @@ function UziReportSection({
       )}
 
       <div className="text-[10px] text-muted-foreground">
-        UZI 为排雷/尽调结论（通过标准＝没查出问题），非买卖信号。重跑 UZI 后点「重新同步」刷新。
+        UZI 为排雷/尽调结论（通过标准＝没查出问题），非买卖信号。
+        「重新调研」会联网重跑一次并自动刷新；「仅同步」只重读磁盘已有产出。
       </div>
     </div>
   )
@@ -2337,6 +2555,15 @@ function UziReportSection({
 // 维度分 0–10 的染色（综合分 0–100 另算）
 function trapColorCls(s: number) {
   return s >= 7 ? 'text-emerald-600' : s >= 4 ? 'text-amber-600' : 'text-rose-600'
+}
+
+/** 秒 → 「1分23秒」；未知返回「—」 */
+function fmtElapsed(sec?: number | null) {
+  if (sec == null) return '—'
+  if (sec < 60) return `${sec}秒`
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}分${String(s).padStart(2, '0')}秒`
 }
 
 type UziTone = 'good' | 'warn' | 'bad' | 'unknown'

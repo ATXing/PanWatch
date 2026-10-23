@@ -77,6 +77,21 @@ export const insightApi = {
     fetchAPI<T>(`/uzi/resync?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}`, {
       method: 'POST',
     }),
+
+  /** 后台真跑一次 UZI 调研（lite/medium），立即返回任务 */
+  uziAnalyze: <T>(symbol: string, market: string, tier?: string) =>
+    fetchAPI<T>(
+      `/uzi/analyze?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}${
+        tier ? `&tier=${encodeURIComponent(tier)}` : ''
+      }`,
+      { method: 'POST', timeoutMs: 30000 },
+    ),
+
+  /** 轮询调研进度；tail>0 时带日志尾部（失败排查用） */
+  uziJob: <T>(symbol: string, market: string, tail = 0) =>
+    fetchAPI<T>(
+      `/uzi/job?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}&tail=${tail}`,
+    ),
 }
 
 export interface UziDimension {
@@ -117,6 +132,33 @@ export interface UziListItem {
   one_liner?: string
   coverage_pct?: number
   html_available?: boolean
+}
+
+/** 后台调研任务（/uzi/analyze 与 /uzi/job 返回） */
+export interface UziJob {
+  job_id: string
+  symbol: string
+  market: string
+  ticker?: string
+  tier?: string
+  status: 'running' | 'success' | 'failed' | 'interrupted'
+  pid?: number
+  started_at?: string
+  finished_at?: string
+  exit_code?: number | null
+  error?: string | null
+  running?: boolean
+  can_restart?: boolean
+  done_dims?: number
+  phase?: string
+  elapsed_sec?: number | null
+  result?: {
+    tier?: string
+    as_of_date?: string
+    fundamental_score?: number
+    coverage_pct?: number
+  } | null
+  log_tail?: string[]
 }
 
 export interface AnnouncementToneItem {

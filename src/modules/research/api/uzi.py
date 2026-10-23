@@ -1,8 +1,10 @@
 """UZI 调研结果查询端点。
 
-- GET /api/uzi/report?symbol=&market=  返回结构化调研(无则 exists=False)
-- GET /api/uzi/report-html?symbol=&market=  直接吐出 standalone HTML 完整报告
+- GET  /api/uzi/report?symbol=&market=  返回结构化调研(无则 exists=False)
+- GET  /api/uzi/report-html?symbol=&market=  直接吐出 standalone HTML 完整报告
 - POST /api/uzi/resync?symbol=&market=  从磁盘重读最新 UZI 产出并刷新库(不触发 LLM)
+- POST /api/uzi/analyze?symbol=&market=&tier=  后台起一次真实调研(子进程跑 run.py)
+- GET  /api/uzi/job?symbol=&market=  轮询调研进度;成功时已自动回写库
 
 UZI 是排雷/尽调层,不是 buy/sell 信号;此端点只读接入,不动交易逻辑。
 """
@@ -17,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from src.modules.research import uzi_sync
+from src.modules.research import uzi_jobs, uzi_sync
 from src.platform.persistence.database import get_db
 
 router = APIRouter()
@@ -140,3 +142,40 @@ def resync_uzi(
     if not res:
         raise HTTPException(status_code=404, detail="no UZI output on disk for " + ticker)
     return {"ok": True, **res}
+
+
+@router.post("/analyze")
+def analyze_uzi(
+    symbol: str = Query(...),
+    market: str = Query(...),
+    tier: str | None = Query(None, description="lite / medium（deep 需 agent 介入，不开放）"),
+):
+    """在后台真跑一次 UZI 调研（子进程），立即返回任务信息。
+
+    前端随后轮询 GET /api/uzi/job 拿进度；进程成功退出时会自动把新结果
+    sync 进 uzi_reports，故轮询到 success 即代表库已刷新。
+    """
+    try:
+        job = uzi_jobs.start_job(symbol, market, tier)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=f"UZI 运行环境缺失: {e}") from e
+    if not job:
+        raise HTTPException(status_code=500, detail="failed to start UZI job")
+    return {"ok": True, "job": job}
+
+
+@router.get("/job")
+def get_uzi_job(
+    symbol: str = Query(...),
+    market: str = Query(...),
+    tail: int = Query(0, ge=0, le=80, description=">0 时附带日志尾部行数，供失败排查"),
+):
+    """查最近一次调研任务状态。无任务返回 exists=False。"""
+    job = uzi_jobs.get_job(symbol, market)
+    if not job:
+        return {"exists": False}
+    if tail > 0:
+        job["log_tail"] = uzi_jobs._log_tail(job.get("log_path") or "", tail)
+    return {"exists": True, "job": job}
