@@ -2182,12 +2182,25 @@ function UziReportSection({
 
   const dims = report.dimensions || {}
   const dimEntries = Object.entries(dims)
+  const trap = dims['18_trap']
+  // UZI 拼 one-liner 时把 emoji 和自己的 emoji 叠加了（"🟢 🟢 安全"），显示前收敛成一个
+  const oneLiner = (report.one_liner || '').replace(/([\u{1F300}-\u{1FAFF}])\s*\1/gu, '$1')
   const scoreColor =
     (report.fundamental_score ?? 0) >= 60
       ? 'text-emerald-600'
       : (report.fundamental_score ?? 0) >= 40
         ? 'text-amber-600'
         : 'text-rose-600'
+
+  // 按 UZI 官方分类分组（CAT_GROUPS），每组内保持官方维度顺序
+  const groups = UZI_DIM_GROUPS.map((g) => ({
+    label: g.label,
+    items: g.keys
+      .filter((k) => !!dims[k])
+      .map((k) => [k, dims[k]] as [string, (typeof dims)[string]]),
+  })).filter((g) => g.items.length > 0)
+  const knownKeys = new Set(UZI_DIM_GROUPS.flatMap((g) => g.keys))
+  const unknownItems = dimEntries.filter(([k]) => !knownKeys.has(k))
 
   return (
     <div className="space-y-3 text-[13px]">
@@ -2237,59 +2250,160 @@ function UziReportSection({
         </div>
       </div>
 
-      {report.one_liner && (
-        <div className="card p-3 text-[12px] leading-relaxed text-foreground/90 whitespace-pre-line">
-          {report.one_liner}
+      {oneLiner && (
+        <div className="space-y-1">
+          <div className="card p-3 text-[12px] leading-relaxed text-foreground/90 whitespace-pre-line">
+            {oneLiner}
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            末行「🟢 安全」是下方第 18 项「杀猪盘扫描」的结论，不是买卖建议。
+          </div>
         </div>
       )}
 
-      <div className="text-[11px] text-muted-foreground">
-        UZI 维度体检（{dimEntries.length} 项 · 每项 10 分制）· 评分越高代表该项越健康
+      {trap && (
+        <div className="card p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[12px] font-medium">杀猪盘扫描（维度 18）</div>
+            <div className={`text-[13px] font-bold font-mono ${trapColorCls(trap.score ?? 0)}`}>
+              {trap.score ?? '—'}
+              <span className="text-[10px] font-normal text-muted-foreground"> /10</span>
+            </div>
+          </div>
+          <div className="mt-1 text-[12px] text-foreground/85">{trap.label || '—'}</div>
+          <div className="mt-1 text-[10px] text-muted-foreground leading-relaxed">
+            查的是公开帖（小红书 / 雪球等）里有没有「老师荐股 / 进群 / 内幕消息」这类推广痕迹：
+            同一信号命中 ≥2 个高危词算 1 个信号，≤1 个信号判 🟢 安全，2–3 个 🟡 注意、4–5 个 🟠 警惕、&gt;5 个 🔴 高度可疑。
+          </div>
+        </div>
+      )}
+
+      <div className="text-[11px] text-muted-foreground leading-relaxed">
+        维度体检共 {dimEntries.length} 项，按 UZI 官方分类分组。每项 0–10 分：
+        7–10 健康 · 4–6 中性 · 0–3 偏弱；顶部「综合分」是 0–100，按各维度权重加权（权重 0 的项不计入，如港股无龙虎榜）。
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-        {dimEntries.map(([key, dim]) => {
-          // UZI 单维度是 0–10 制(综合分才是 0–100)
-          const s = dim?.score ?? 0
-          const cls = s >= 7 ? 'text-emerald-600' : s >= 4 ? 'text-amber-600' : 'text-rose-600'
-          return (
-            <div key={key} className="card p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="text-[12px] font-medium leading-snug">{dim?.label || key}</div>
-                <div className={`text-[14px] font-bold font-mono shrink-0 ${cls}`}>
-                  {s}
-                  <span className="text-[10px] font-normal text-muted-foreground"> /10</span>
-                  {typeof dim?.weight === 'number' && dim.weight > 0 && (
-                    <span className="ml-1 text-[9px] font-normal text-muted-foreground">权{dim.weight}</span>
-                  )}
-                </div>
-              </div>
-              {dim?.reasons_pass?.length > 0 && (
-                <ul className="mt-1.5 space-y-0.5">
-                  {dim.reasons_pass.map((r, i) => (
-                    <li key={`p${i}`} className="text-[11px] text-emerald-700 dark:text-emerald-400 leading-snug">
-                      ✓ {r}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {dim?.reasons_fail?.length > 0 && (
-                <ul className="mt-1.5 space-y-0.5">
-                  {dim.reasons_fail.map((r, i) => (
-                    <li key={`f${i}`} className="text-[11px] text-rose-700 dark:text-rose-400 leading-snug">
-                      ✗ {r}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )
-        })}
-      </div>
+      {groups.map((g) => (
+        <div key={g.label} className="space-y-2">
+          <div className="text-[11px] font-medium text-foreground/70 pt-1">{g.label}</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {g.items.map(([key, dim]) => (
+              <UziDimCard key={key} dimKey={key} dim={dim} />
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {unknownItems.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-[11px] font-medium text-foreground/70 pt-1">其他维度</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {unknownItems.map(([key, dim]) => (
+              <UziDimCard key={key} dimKey={key} dim={dim} />
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="text-[10px] text-muted-foreground">
         UZI 为排雷/尽调结论（通过标准＝没查出问题），非买卖信号。重跑 UZI 后点「重新同步」刷新。
       </div>
     </div>
   )
+}
+
+// 维度分 0–10 的染色（综合分 0–100 另算）
+function trapColorCls(s: number) {
+  return s >= 7 ? 'text-emerald-600' : s >= 4 ? 'text-amber-600' : 'text-rose-600'
+}
+
+function UziDimCard({
+  dimKey,
+  dim,
+}: {
+  dimKey: string
+  dim: { score?: number; weight?: number; label?: string; reasons_pass?: string[]; reasons_fail?: string[] } | undefined
+}) {
+  const meta = UZI_DIM_META[dimKey]
+  const s = dim?.score ?? 0
+  const weight = typeof dim?.weight === 'number' ? dim.weight : undefined
+
+  return (
+    <div className="card p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[12px] font-medium leading-snug">{meta?.title || dim?.label || dimKey}</div>
+          {meta && (
+            <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">
+              看 {meta.kpis} · {weight && weight > 0 ? `权重 ${weight}` : '不计入综合分'}
+            </div>
+          )}
+        </div>
+        <div className={`text-[14px] font-bold font-mono shrink-0 ${trapColorCls(s)}`}>
+          {dim?.score ?? '—'}
+          <span className="text-[10px] font-normal text-muted-foreground"> /10</span>
+        </div>
+      </div>
+
+      <div className="mt-1 text-[11px] text-foreground/85 leading-snug">{dim?.label || '—'}</div>
+      {meta && (
+        <div className="mt-1 text-[10px] text-muted-foreground leading-snug">{meta.why}</div>
+      )}
+
+      {dim?.reasons_pass && dim.reasons_pass.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5">
+          {dim.reasons_pass.map((r, i) => (
+            <li key={`p${i}`} className="text-[11px] text-emerald-700 dark:text-emerald-400 leading-snug">
+              ✓ {r}
+            </li>
+          ))}
+        </ul>
+      )}
+      {dim?.reasons_fail && dim.reasons_fail.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5">
+          {dim.reasons_fail.map((r, i) => (
+            <li key={`f${i}`} className="text-[11px] text-rose-700 dark:text-rose-400 leading-snug">
+              ✗ {r}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/**
+ * UZI 19 维的官方中文名 / 看哪些指标 / 为什么看它。
+ * 名称·权重·KPI 直接取自 UZI 源码 scripts/assemble_report.py 的 DIM_META（勿自创），
+ * why 为按 KPI 意思写的白话解释。
+ */
+const UZI_DIM_GROUPS: { label: string; keys: string[] }[] = [
+  { label: '财务质量', keys: ['1_financials', '10_valuation', '14_moat'] },
+  { label: '市场与资金', keys: ['2_kline', '12_capital_flow', '16_lhb'] },
+  { label: '行业与产业链', keys: ['4_peers', '5_chain', '7_industry', '8_materials', '9_futures'] },
+  { label: '公司与治理', keys: ['11_governance', '15_events', '6_research'] },
+  { label: '宏观与政策', keys: ['3_macro', '13_policy'] },
+  { label: '安全与情绪', keys: ['17_sentiment', '18_trap', '19_contests'] },
+]
+
+const UZI_DIM_META: Record<string, { title: string; kpis: string; why: string }> = {
+  '1_financials': { title: '财报扎实度', kpis: 'ROE、净利率、营收增速、自由现金流', why: '赚的利润是不是真金白银，有没有靠负债堆出来的增长。' },
+  '2_kline': { title: 'K 线技术面', kpis: 'Stage、均线排列、MACD、RSI', why: '描述当下的技术姿态（趋势/超买超卖），不预测未来，别当买卖信号。' },
+  '3_macro': { title: '宏观环境', kpis: '利率、汇率、地缘、大宗', why: '外部环境顺不顺手：加息周期、汇率波动、地缘冲突对它的影响方向。' },
+  '4_peers': { title: '同行对比', kpis: '行业排名、毛利率vs、ROE vs、增速vs', why: '在同行里排第几，比同行强还是弱。' },
+  '5_chain': { title: '上下游产业链', kpis: '上游、下游、大客户集中、供应商集中', why: '议价能力强不强，会不会被单一大客户或供应商卡脖子。' },
+  '6_research': { title: '研报观点', kpis: '覆盖券商、买入比例、目标价均值、上涨空间', why: '卖方（券商）怎么看，目标和现价差多少——注意这是他们的立场，不是事实。' },
+  '7_industry': { title: '行业景气', kpis: '行业增速、TAM、渗透率、生命周期', why: '赛道本身好不好：在增长还是在衰退，渗透率还有没有空间。' },
+  '8_materials': { title: '原材料', kpis: '核心材料、12M 趋势、成本占比、进口依赖', why: '成本端压力：核心材料涨价/跌价会不会直接吃掉利润。' },
+  '9_futures': { title: '期货关联', kpis: '关联品种、走势', why: '有对应期货品种的话，期货价格往往领先反映现货预期。' },
+  '10_valuation': { title: '估值多维', kpis: '当前 PE、PE 5 年分位、行业均值、DCF 内在值', why: '贵不贵：跟自己历史比（分位）、跟同行比、跟算出来的内在价值比。' },
+  '11_governance': { title: '管理层与治理', kpis: '实控人质押、近 12 月增减持、关联交易、违规记录', why: '大股东靠不靠谱：高质押、密集减持、频繁违规都是警报。' },
+  '12_capital_flow': { title: '资金面', kpis: '主力资金 20 日、融资余额、股东户数、主力 5 日', why: '钱在进还是在出：主力净流入、杠杆资金增减、筹码是集中还是分散。' },
+  '13_policy': { title: '政策与监管', kpis: '政策方向、补贴税收、监管动向、反垄断', why: '政策风往哪吹：是顺风（补贴/支持）还是逆风（监管/反垄断）。' },
+  '14_moat': { title: '护城河（5 类）', kpis: '无形资产、转换成本、网络效应、规模优势', why: '别人抄不抄得动——护城河越深，高利润能撑得越久。' },
+  '15_events': { title: '事件驱动', kpis: '近 30 天事件、催化剂、业绩预告、利空', why: '有没有马上要发生的事（财报、解禁、诉讼）会扰动股价。' },
+  '16_lhb': { title: '龙虎榜', kpis: '30 天上榜、识别游资、机构净买、游资净买', why: '谁在买：机构和游资的进出。A 股专属，港股/美股通常显示「市场不适用」。' },
+  '17_sentiment': { title: '舆情与大V', kpis: '雪球热度、股吧讨论、大V提及、正面占比', why: '讨论热度和情绪。热度高不等于好，过热往往是风险。' },
+  '18_trap': { title: '杀猪盘检测', kpis: '命中信号、风险等级、高危词、证据数', why: '有没有「老师荐股/进群」这类割韭菜推广痕迹。通过＝没查出问题。' },
+  '19_contests': { title: '实盘比赛持仓', kpis: '雪球组合、高收益持有、淘股吧、同花顺模拟', why: '是否被短线比赛资金扎堆——扎堆意味着筹码不稳、波动大。' },
 }

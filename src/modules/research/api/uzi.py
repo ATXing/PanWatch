@@ -80,7 +80,12 @@ def get_uzi_report_html(symbol: str, market: str):
     row = _fetch_row(symbol, market)
     if not row or not row[8] or not os.path.exists(row[8]):
         raise HTTPException(status_code=404, detail="UZI report not found")
-    return FileResponse(row[8], media_type="text/html", filename=f"{symbol}.html")
+    # 必须 inline:带 filename 会让 FastAPI 下发 attachment 头,浏览器变成下载而不是打开
+    return FileResponse(
+        row[8],
+        media_type="text/html",
+        headers={"Content-Disposition": f'inline; filename="{symbol}.html"'},
+    )
 
 
 @router.post("/resync")
