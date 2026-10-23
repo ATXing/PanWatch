@@ -8,6 +8,7 @@ import {
   tradingAgentsApi,
   type DeepAnalysisResult,
   type HistoryComparisonResponse,
+  type UziReport,
 } from '@panwatch/api'
 import { getMarketBadge } from '@panwatch/biz-ui'
 import { useLocalStorage } from '@/lib/utils'
@@ -115,7 +116,7 @@ interface PortfolioSummaryResponse {
   }>
 }
 
-type InsightTab = 'overview' | 'kline' | 'suggestions' | 'news' | 'announcements' | 'reports' | 'deep'
+type InsightTab = 'overview' | 'kline' | 'suggestions' | 'news' | 'announcements' | 'reports' | 'deep' | 'uzi'
 
 interface StockAgentInfo {
   agent_name: string
@@ -387,6 +388,7 @@ export default function StockInsightModal(props: {
   const [deepShowDebate, setDeepShowDebate] = useState(false)
   const [deepHistory, setDeepHistory] = useState<HistoryComparisonResponse | null>(null)
   const [deepHistoryLoading, setDeepHistoryLoading] = useState(false)
+  const [uziReport, setUziReport] = useState<UziReport | null>(null)
   const [klineInterval] = useState<'1d' | '1w' | '1m'>('1d')
   const [alerting, setAlerting] = useState(false)
   const [watchingStock, setWatchingStock] = useState<StockItem | null>(null)
@@ -701,6 +703,27 @@ export default function StockInsightModal(props: {
     }
   }, [symbol, market])
 
+  const loadUzi = useCallback(async () => {
+    if (!symbol) return
+    try {
+      const r = await insightApi.uziReport<UziReport>(symbol, market)
+      setUziReport(r && r.exists ? r : null)
+    } catch {
+      setUziReport(null)
+    } finally {
+    }
+  }, [symbol, market])
+
+  const handleUziResync = useCallback(async () => {
+    if (!symbol) return
+    try {
+      await insightApi.uziResync<{ ok: boolean }>(symbol, market)
+    } catch {
+      /* 磁盘无新产出时静默忽略 */
+    }
+    await loadUzi()
+  }, [symbol, market, loadUzi])
+
   useEffect(() => {
     if (!props.open || !symbol) return
     setTab('overview')
@@ -710,11 +733,13 @@ export default function StockInsightModal(props: {
     setReports([])
     setMiniKlines([])
     setWatchingStock(null)
+    setUziReport(null)
     setDeepResult(null)
     setDeepLoaded(false)
     setDeepHistory(null)
     loadCore()
-  }, [props.open, symbol, market, loadCore])
+    loadUzi()
+  }, [props.open, symbol, market, loadCore, loadUzi])
 
   // 切到「深度」tab 时按需拉取(仅首次)
   useEffect(() => {
@@ -1367,6 +1392,7 @@ export default function StockInsightModal(props: {
                 { id: 'suggestions', label: tr('tabs.suggestions', { count: suggestions.length }) },
                 { id: 'reports', label: tr('tabs.reports', { count: reports.length }) },
                 { id: 'deep', label: deepResult ? tr('tabs.deepCount') : tr('tabs.deep') },
+                ...(uziReport ? [{ id: 'uzi', label: 'UZI 调研' }] : []),
                 { id: 'kline', label: tr('tabs.kline') },
                 { id: 'announcements', label: tr('tabs.announcements', { count: announcements.length }) },
                 { id: 'news', label: tr('tabs.news', { count: news.length }) },
@@ -1752,6 +1778,15 @@ export default function StockInsightModal(props: {
               </div>
             )}
 
+            {tab === 'uzi' && uziReport && (
+              <UziReportSection
+                report={uziReport}
+                symbol={symbol}
+                market={market}
+                onResync={handleUziResync}
+              />
+            )}
+
             {tab === 'suggestions' && (
               <div className="space-y-3">
                 <div className="card p-3 flex items-center justify-between gap-3">
@@ -2118,6 +2153,142 @@ function DeepHistoryComparison({
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+function UziReportSection({
+  report,
+  symbol,
+  market,
+  onResync,
+}: {
+  report: UziReport
+  symbol: string
+  market: string
+  onResync: () => void
+}) {
+  const [resyncing, setResyncing] = useState(false)
+
+  const handleResync = async () => {
+    setResyncing(true)
+    try {
+      onResync()
+    } finally {
+      setResyncing(false)
+    }
+  }
+
+  const dims = report.dimensions || {}
+  const dimEntries = Object.entries(dims)
+  const scoreColor =
+    (report.fundamental_score ?? 0) >= 60
+      ? 'text-emerald-600'
+      : (report.fundamental_score ?? 0) >= 40
+        ? 'text-amber-600'
+        : 'text-rose-600'
+
+  return (
+    <div className="space-y-3 text-[13px]">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          {report.tier && (
+            <span className="text-[11px] px-2 py-0.5 rounded bg-accent/60 text-foreground/80">
+              {report.tier}
+            </span>
+          )}
+          {report.fundamental_score != null && (
+            <span className={`text-[15px] font-bold font-mono ${scoreColor}`}>
+              {report.fundamental_score}
+              <span className="text-[11px] font-normal text-muted-foreground"> 分</span>
+            </span>
+          )}
+          {report.coverage_pct != null && (
+            <span className="text-[11px] text-muted-foreground">数据覆盖 {report.coverage_pct}%</span>
+          )}
+          {report.as_of_date && (
+            <span className="text-[11px] text-muted-foreground">截至 {report.as_of_date}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            onClick={handleResync}
+            disabled={resyncing}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${resyncing ? 'animate-spin' : ''}`} />
+            重新同步
+          </Button>
+          {report.html_available && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              onClick={() =>
+                window.open(`/api/uzi/report-html?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}`, '_blank')
+              }
+            >
+              <ExternalLink className="w-3.5 h-3.5 mr-1" /> 查看完整报告
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {report.one_liner && (
+        <div className="card p-3 text-[12px] leading-relaxed text-foreground/90 whitespace-pre-line">
+          {report.one_liner}
+        </div>
+      )}
+
+      <div className="text-[11px] text-muted-foreground">
+        UZI 维度体检（{dimEntries.length} 项 · 每项 10 分制）· 评分越高代表该项越健康
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {dimEntries.map(([key, dim]) => {
+          // UZI 单维度是 0–10 制(综合分才是 0–100)
+          const s = dim?.score ?? 0
+          const cls = s >= 7 ? 'text-emerald-600' : s >= 4 ? 'text-amber-600' : 'text-rose-600'
+          return (
+            <div key={key} className="card p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="text-[12px] font-medium leading-snug">{dim?.label || key}</div>
+                <div className={`text-[14px] font-bold font-mono shrink-0 ${cls}`}>
+                  {s}
+                  <span className="text-[10px] font-normal text-muted-foreground"> /10</span>
+                  {typeof dim?.weight === 'number' && dim.weight > 0 && (
+                    <span className="ml-1 text-[9px] font-normal text-muted-foreground">权{dim.weight}</span>
+                  )}
+                </div>
+              </div>
+              {dim?.reasons_pass?.length > 0 && (
+                <ul className="mt-1.5 space-y-0.5">
+                  {dim.reasons_pass.map((r, i) => (
+                    <li key={`p${i}`} className="text-[11px] text-emerald-700 dark:text-emerald-400 leading-snug">
+                      ✓ {r}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {dim?.reasons_fail?.length > 0 && (
+                <ul className="mt-1.5 space-y-0.5">
+                  {dim.reasons_fail.map((r, i) => (
+                    <li key={`f${i}`} className="text-[11px] text-rose-700 dark:text-rose-400 leading-snug">
+                      ✗ {r}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="text-[10px] text-muted-foreground">
+        UZI 为排雷/尽调结论（通过标准＝没查出问题），非买卖信号。重跑 UZI 后点「重新同步」刷新。
       </div>
     </div>
   )

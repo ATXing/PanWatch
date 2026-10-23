@@ -43,6 +43,7 @@ from src.modules.research.api import (
     evaluations,
     insights,
     recommendations,
+    uzi,
 )
 from src.modules.strategy.api import factors
 from src.web.response import ResponseWrapperMiddleware
@@ -154,6 +155,17 @@ app.include_router(
     prefix="/api/recommendations",
     tags=["recommendations"],
     dependencies=protected,
+)
+app.include_router(
+    uzi.router,
+    prefix="/api/uzi",
+    tags=["uzi"],
+    dependencies=protected,
+)
+app.include_router(
+    uzi.public_router,
+    prefix="/api/uzi",
+    tags=["uzi-public"],
 )
 app.include_router(
     dashboard.router,

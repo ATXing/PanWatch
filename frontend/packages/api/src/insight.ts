@@ -66,6 +66,35 @@ export const insightApi = {
       body: JSON.stringify(params),
       timeoutMs: 40000,
     }),
+
+  uziReport: <T>(symbol: string, market: string) =>
+    fetchAPI<T>(`/uzi/report?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}`),
+
+  uziResync: <T>(symbol: string, market: string) =>
+    fetchAPI<T>(`/uzi/resync?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}`, {
+      method: 'POST',
+    }),
+}
+
+export interface UziDimension {
+  score: number
+  weight: number
+  label: string
+  reasons_pass: string[]
+  reasons_fail: string[]
+}
+
+export interface UziReport {
+  exists: boolean
+  symbol?: string
+  market?: string
+  tier?: string
+  as_of_date?: string
+  fundamental_score?: number
+  one_liner?: string
+  coverage_pct?: number
+  dimensions?: Record<string, UziDimension>
+  html_available?: boolean
 }
 
 export interface AnnouncementToneItem {
