@@ -2193,7 +2193,7 @@ function UziReportSection({
     <div className="space-y-3 text-[13px]">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          {report.tier && (
+          {report.tier && report.tier !== 'unknown' && (
             <span className="text-[11px] px-2 py-0.5 rounded bg-accent/60 text-foreground/80">
               {report.tier}
             </span>
