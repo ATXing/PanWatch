@@ -41,7 +41,8 @@ import FirstAnalysis from '@/components/onboarding/FirstAnalysis'
  * UZI 是排雷/尽调结论,不是涨跌信号,故不用红绿配色(避免与涨跌语义混淆)。
  */
 function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
-  const score = typeof info.fundamental_score === 'number' ? info.fundamental_score : null
+  // 只用实测口径分：UZI 原分把占位分/未采集的默认分一起加权，挂到列表上会误导
+  const score = info.trusted && typeof info.real_score === 'number' ? info.real_score : null
   const toneCls =
     score == null
       ? 'bg-accent text-muted-foreground border-border'
@@ -55,7 +56,12 @@ function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
   const brief = (info.one_liner || '').split('\n')[0].replace(/🟢\s*/g, '').trim()
   const tip = [
     `UZI 调研${info.tier ? ` · ${info.tier} 档` : ''}${info.as_of_date ? ` · ${fmtDate(info.as_of_date)}` : ''}`,
-    info.coverage_pct != null ? `数据覆盖 ${Number(info.coverage_pct).toFixed(0)}%` : '',
+    score != null
+      ? `实测口径 ${score.toFixed(1)} 分（${info.real_dims ?? '?'}/${info.total_dims ?? '?'} 维有真实数据，覆盖权重 ${Number(
+          info.real_weight_pct ?? 0
+        ).toFixed(0)}%）`
+      : `数据不足，未评分（${info.real_dims ?? 0}/${info.total_dims ?? '?'} 维有真实数据）`,
+    info.fundamental_score != null ? `UZI 原分 ${info.fundamental_score}（含占位/默认分，仅供参考）` : '',
     brief,
     '点击进入 UZI 调研结果页',
   ]

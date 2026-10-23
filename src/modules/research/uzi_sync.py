@@ -143,6 +143,48 @@ _NO_DATA_LABELS = (
     "无数据",
 )
 
+# 真实口径综合分的最低门槛:达到才敢给数字,否则直说「数据不足,不予评分」
+MIN_REAL_DIMS = 3
+MIN_REAL_WEIGHT_PCT = 30.0
+
+# 视为「没拿到值」的占位符。注意 **不把 0 算缺失** ——
+# 「近 30 天龙虎榜 0 次」是实测结论,UZI 自己的 _is_missing 把 "0"/"0.0"
+# 也当空值,那是把真实结论抹掉,这里不跟。
+_MISSING_TOKENS = {
+    "",
+    "—",
+    "-",
+    "--",
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "n/a/none",
+    "无",
+    "未知",
+    "未获取",
+    "无数据",
+    "数据缺失",
+}
+
+
+def _is_missing(v) -> bool:
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return v.strip().lower() in _MISSING_TOKENS
+    if isinstance(v, (list, dict, tuple, set)):
+        return len(v) == 0
+    return False
+
+
+def _has_content(data) -> bool:
+    """该维度是否真的采到了内容（任一子字段有非空值）。"""
+    if not isinstance(data, dict):
+        return False
+    return any(not _is_missing(v) for v in data.values())
+
+
 
 def _dim_status(dims: dict, raw_dims: dict) -> dict[str, dict]:
     """给每个已打分维度标注数据性质,返回 {dimkey: {status, note?}}。"""
@@ -153,7 +195,8 @@ def _dim_status(dims: dict, raw_dims: dict) -> dict[str, dict]:
         weight = dim.get("weight")
         label = str(dim.get("label") or "")
         raw = raw_dims.get(key)
-        has_raw = isinstance(raw, dict) and bool(raw.get("data"))
+        # 「有数据」必须是 data 里真有非空值:data={} 或 {"a": None} 都不算
+        has_raw = isinstance(raw, dict) and _has_content(raw.get("data"))
         fallback = isinstance(raw, dict) and raw.get("fallback") is True
 
         if weight == 0:
@@ -165,18 +208,106 @@ def _dim_status(dims: dict, raw_dims: dict) -> dict[str, dict]:
             level = data.get("trap_level")
             hit = data.get("signals_hit")
             if has_raw and level:
-                out[key] = {"status": "stub", "note": f"{hit or '—'} 命中 · {level}"}
+                out[key] = {"status": "stub", "note": f"{hit or '—'} 命中 · {level}（分数仍为固定 9）"}
             else:
                 out[key] = {"status": "none", "note": "未扫描 · 9 分是默认值，不代表已排查"}
         elif key in _STUB_DIMS:
-            out[key] = {"status": "stub", "note": "UZI 此项为固定占位分"}
+            # 打分层写死固定分,即便 raw 里有兜底文本也不算实测
+            out[key] = {"status": "stub", "note": "UZI 此项为固定占位分，不随标的改变"}
         elif not has_raw:
             out[key] = {"status": "none", "note": "本次未采集，分数为默认值"}
         elif fallback or any(s in label for s in _NO_DATA_LABELS):
-            out[key] = {"status": "weak", "note": "兜底/推断值，参考价值低"}
+            out[key] = {"status": "weak", "note": "兜底/推断值，无实测依据"}
         else:
             out[key] = {"status": "ok"}
     return out
+
+
+def _score_integrity(dims: dict, dim_status: dict) -> dict:
+    """按「只认实测维度」的口径重算综合分,并给出可信度与缺失清单。
+
+    UZI 的 fundamental_score 把固定占位分、未采集的默认分一起加权,
+    等于让猜测参与打分(伊利 19 维里只有 6 维是真数据,权重占 37%)。
+    这里按定义自算一个 real_score,并明确告诉前端够不够格给分。
+    """
+    total_weight = 0.0
+    real_weight = 0.0
+    real_sum = 0.0
+    counts = {"ok": 0, "stub": 0, "weak": 0, "none": 0}
+    real_keys: list[str] = []
+    total_dims = 0
+
+    for key, dim in dims.items():
+        if not isinstance(dim, dict):
+            continue
+        total_dims += 1
+        weight = float(dim.get("weight") or 0)
+        score = dim.get("score")
+        status = (dim_status.get(key) or {}).get("status", "none")
+        if status in counts:
+            counts[status] += 1
+        if weight <= 0:
+            continue
+        total_weight += weight
+        if status == "ok" and isinstance(score, (int, float)):
+            real_weight += weight
+            real_sum += score * weight
+            real_keys.append(key)
+
+    real_dims = len(real_keys)
+    weight_pct = (real_weight / total_weight * 100) if total_weight else 0.0
+    raw_real = (real_sum / real_weight * 10) if real_weight else None
+
+    # 恒等式闸门:结果必须等于逐项重算,否则说明聚合口径写错了
+    if raw_real is not None:
+        recompute = (
+            sum(dims[k]["score"] * float(dims[k].get("weight") or 0) for k in real_keys)
+            / real_weight
+            * 10
+        )
+        assert abs(raw_real - recompute) < 1e-6, (raw_real, recompute)
+
+    trusted = real_dims >= MIN_REAL_DIMS and weight_pct >= MIN_REAL_WEIGHT_PCT
+
+    missing = [
+        {
+            "key": k,
+            "label": str((dims.get(k) or {}).get("label") or "")[:40],
+            "status": v.get("status"),
+            "note": v.get("note") or "",
+            "weight": (dims.get(k) or {}).get("weight"),
+        }
+        for k, v in dim_status.items()
+        if v.get("status") in ("stub", "weak", "none")
+    ]
+    missing.sort(key=lambda x: ({"stub": 0, "weak": 1, "none": 2}.get(x["status"], 3), -(x["weight"] or 0)))
+
+    if trusted:
+        note = (
+            f"只按 {real_dims}/{total_dims} 个有实测数据的维度重算（权重占 {weight_pct:.0f}%）；"
+            f"另 {counts['stub'] + counts['weak'] + counts['none']} 维没有真实依据，未计入。"
+        )
+    else:
+        note = (
+            f"实测维度仅 {real_dims}/{total_dims}（权重占 {weight_pct:.0f}%），"
+            f"不足 {MIN_REAL_DIMS} 维 / {MIN_REAL_WEIGHT_PCT:.0f}% 门槛，不予评分。"
+        )
+
+    return {
+        "real_score": round(raw_real, 1) if (trusted and raw_real is not None) else None,
+        "raw_real_score": round(raw_real, 1) if raw_real is not None else None,
+        "trusted": trusted,
+        "real_dims": real_dims,
+        "total_dims": total_dims,
+        "real_weight_sum": round(real_weight, 2),
+        "total_weight_sum": round(total_weight, 2),
+        "real_weight_pct": round(weight_pct, 1),
+        "status_counts": counts,
+        "real_dim_keys": real_keys,
+        "missing": missing,
+        "note": note,
+    }
+
 
 
 def _ensure_table(conn: sqlite3.Connection):
@@ -201,10 +332,12 @@ def _ensure_table(conn: sqlite3.Connection):
         )
         """
     )
-    # 兼容旧库:dim_status_json 是后加的列
+    # 兼容旧库:dim_status_json / score_integrity_json 是后加的列
     cols = {r[1] for r in conn.execute("PRAGMA table_info(uzi_reports)").fetchall()}
     if "dim_status_json" not in cols:
         conn.execute("ALTER TABLE uzi_reports ADD COLUMN dim_status_json TEXT")
+    if "score_integrity_json" not in cols:
+        conn.execute("ALTER TABLE uzi_reports ADD COLUMN score_integrity_json TEXT")
 
 
 def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
@@ -223,8 +356,11 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
     score = d.get("fundamental_score")
     dims = d.get("dimensions", {})
     dim_status = _dim_status(dims, rd.get("dimensions") or {})
-    integrity = rd.get("_integrity") or {}
-    coverage = integrity.get("coverage_pct") if isinstance(integrity, dict) else None
+    score_integrity = _score_integrity(dims, dim_status)
+    # UZI 自己的 _integrity.coverage_pct 只统计 18 个基础字段(公司名/股价/ROE/PE…),
+    # 与 19 维体检的完整度无关,故在接口层改名为 field_coverage_pct,别让它冒充维度覆盖率
+    uzi_integrity = rd.get("_integrity") or {}
+    coverage = uzi_integrity.get("coverage_pct") if isinstance(uzi_integrity, dict) else None
 
     rdir = _latest_report_dir(ticker)
     one_liner = _read_one_liner(os.path.join(rdir, "one-liner.txt")) if rdir else ""
@@ -252,8 +388,8 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
             INSERT INTO uzi_reports
                 (symbol, market, ticker_raw, tier, as_of_date, fundamental_score,
                  one_liner, coverage_pct, dimensions_json, dim_status_json,
-                 report_dir, html_path, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                 score_integrity_json, report_dir, html_path, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
             ON CONFLICT(symbol, market) DO UPDATE SET
                 ticker_raw=excluded.ticker_raw,
                 tier=excluded.tier,
@@ -263,6 +399,7 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                 coverage_pct=excluded.coverage_pct,
                 dimensions_json=excluded.dimensions_json,
                 dim_status_json=excluded.dim_status_json,
+                score_integrity_json=excluded.score_integrity_json,
                 report_dir=excluded.report_dir,
                 html_path=excluded.html_path,
                 created_at=CURRENT_TIMESTAMP
@@ -278,6 +415,7 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                 coverage,
                 json.dumps(dims, ensure_ascii=False),
                 json.dumps(dim_status, ensure_ascii=False),
+                json.dumps(score_integrity, ensure_ascii=False),
                 rdir or "",
                 html_path,
             ),
@@ -294,6 +432,10 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
         "as_of_date": as_of,
         "fundamental_score": score,
         "coverage_pct": coverage,
+        "real_score": score_integrity.get("real_score"),
+        "real_dims": score_integrity.get("real_dims"),
+        "total_dims": score_integrity.get("total_dims"),
+        "trusted": score_integrity.get("trusted"),
     }
 
 

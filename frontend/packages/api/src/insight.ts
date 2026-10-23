@@ -108,15 +108,38 @@ export interface UziDimStatus {
   note?: string
 }
 
+/** 真实口径评分：只用有实测数据的维度重算，明确标出缺什么 */
+export interface UziScoreIntegrity {
+  real_score?: number | null
+  raw_real_score?: number | null
+  trusted?: boolean
+  real_dims?: number
+  total_dims?: number
+  real_weight_sum?: number
+  total_weight_sum?: number
+  real_weight_pct?: number
+  status_counts?: Record<string, number>
+  real_dim_keys?: string[]
+  missing?: { key: string; label: string; status: 'ok' | 'stub' | 'weak' | 'none'; note: string; weight?: number }[]
+  note?: string
+}
+
 export interface UziReport {
   exists: boolean
   symbol?: string
   market?: string
   tier?: string
   as_of_date?: string
+  /** UZI 原始综合分：含占位分与未采集的默认分，不能当实测结论 */
   fundamental_score?: number
+  /** 只用实测维度重算的分（real_score 不可信时为 null） */
+  real_score?: number | null
+  trusted?: boolean
+  score_integrity?: UziScoreIntegrity
   one_liner?: string
+  /** UZI 的字段覆盖率（18 个基础字段），不是 19 维完整度 */
   coverage_pct?: number
+  field_coverage_pct?: number
   dimensions?: Record<string, UziDimension>
   dim_status?: Record<string, UziDimStatus>
   html_available?: boolean
@@ -129,8 +152,14 @@ export interface UziListItem {
   tier?: string
   as_of_date?: string
   fundamental_score?: number
+  real_score?: number | null
+  trusted?: boolean
+  real_dims?: number
+  total_dims?: number
+  real_weight_pct?: number
   one_liner?: string
   coverage_pct?: number
+  field_coverage_pct?: number
   html_available?: boolean
 }
 
@@ -156,6 +185,10 @@ export interface UziJob {
     tier?: string
     as_of_date?: string
     fundamental_score?: number
+    real_score?: number | null
+    real_dims?: number
+    total_dims?: number
+    trusted?: boolean
     coverage_pct?: number
   } | null
   log_tail?: string[]

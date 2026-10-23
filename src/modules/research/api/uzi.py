@@ -36,7 +36,8 @@ def _fetch_row(symbol: str, market: str):
         cur.execute(
             """
             SELECT symbol, market, tier, as_of_date, fundamental_score,
-                   one_liner, coverage_pct, dimensions_json, html_path, dim_status_json
+                   one_liner, coverage_pct, dimensions_json, html_path, dim_status_json,
+                   score_integrity_json
             FROM uzi_reports WHERE symbol=? AND market=?
             """,
             (symbol, market),
@@ -58,7 +59,7 @@ def list_uzi_reports():
         cur.execute(
             """
             SELECT symbol, market, tier, as_of_date, fundamental_score,
-                   one_liner, coverage_pct, html_path
+                   one_liner, coverage_pct, html_path, score_integrity_json
             FROM uzi_reports
             ORDER BY as_of_date DESC
             """
@@ -66,19 +67,28 @@ def list_uzi_reports():
         rows = cur.fetchall()
     finally:
         conn.close()
-    items = [
-        {
-            "symbol": r[0],
-            "market": r[1],
-            "tier": r[2],
-            "as_of_date": r[3],
-            "fundamental_score": r[4],
-            "one_liner": r[5],
-            "coverage_pct": r[6],
-            "html_available": bool(r[7] and os.path.exists(r[7])),
-        }
-        for r in rows
-    ]
+    items = []
+    for r in rows:
+        integ = json.loads(r[8]) if r[8] else {}
+        items.append(
+            {
+                "symbol": r[0],
+                "market": r[1],
+                "tier": r[2],
+                "as_of_date": r[3],
+                "fundamental_score": r[4],
+                # 列表标签只用真实口径分;没有就空着,不拿含占位的总分充数
+                "real_score": integ.get("real_score"),
+                "trusted": integ.get("trusted", False),
+                "real_dims": integ.get("real_dims"),
+                "total_dims": integ.get("total_dims"),
+                "real_weight_pct": integ.get("real_weight_pct"),
+                "one_liner": r[5],
+                "coverage_pct": r[6],
+                "field_coverage_pct": r[6],
+                "html_available": bool(r[7] and os.path.exists(r[7])),
+            }
+        )
     return {"count": len(items), "items": items}
 
 
@@ -98,9 +108,11 @@ def get_uzi_report(symbol: str, market: str, db: Session = Depends(get_db)):
         dims_json,
         html_path,
         dim_status_json,
+        integrity_json,
     ) = row
     dims = json.loads(dims_json) if dims_json else {}
     dim_status = json.loads(dim_status_json) if dim_status_json else {}
+    integrity = json.loads(integrity_json) if integrity_json else {}
     return {
         "exists": True,
         "symbol": symbol,
@@ -108,8 +120,13 @@ def get_uzi_report(symbol: str, market: str, db: Session = Depends(get_db)):
         "tier": tier,
         "as_of_date": as_of,
         "fundamental_score": score,
+        "real_score": integrity.get("real_score"),
+        "trusted": integrity.get("trusted"),
+        "score_integrity": integrity,
         "one_liner": one_liner,
         "coverage_pct": coverage,
+        # 明确改名:UZI 的 coverage_pct 是 18 个基础字段的通过率,不是 19 维完整度
+        "field_coverage_pct": coverage,
         "dimensions": dims,
         "dim_status": dim_status,
         "html_available": bool(html_path and os.path.exists(html_path)),

@@ -2192,10 +2192,11 @@ function UziReportSection({
   const [starting, setStarting] = useState(false)
   const [jobError, setJobError] = useState('')
   const [showLog, setShowLog] = useState(false)
+  const [showMissing, setShowMissing] = useState(false)
   const [tier, setTier] = useState<string>(report.tier === 'lite' ? 'lite' : 'medium')
   // 同一个 job_id 只触发一次刷新，避免轮询把 onResync 刷爆
   const refreshedJobRef = useRef<string | null>(null)
-  const prevScoreRef = useRef<number | null>(report.fundamental_score ?? null)
+  const prevScoreRef = useRef<number | null>(typeof report.real_score === 'number' ? report.real_score : null)
 
   // 进面板先问一次：上次发起的调研可能还在后台跑
   useEffect(() => {
@@ -2259,7 +2260,7 @@ function UziReportSection({
   const startAnalyze = async () => {
     setStarting(true)
     setJobError('')
-    prevScoreRef.current = report.fundamental_score ?? null
+    prevScoreRef.current = typeof report.real_score === 'number' ? report.real_score : null
     try {
       const r = await insightApi.uziAnalyze<{ ok: boolean; job: UziJob }>(symbol, market, tier)
       if (r?.job) setJob(r.job)
@@ -2283,14 +2284,15 @@ function UziReportSection({
   const dims = report.dimensions || {}
   const dimEntries = Object.entries(dims)
   const trap = dims['18_trap']
+  // 维度 18 的数据性质：none = 本次没扫公开帖，此时不能把 9 分当「安全」结论
+  const trapStatus = (report.dim_status || {})['18_trap']
   // UZI 拼 one-liner 时把 emoji 和自己的 emoji 叠加了（"🟢 🟢 安全"），显示前收敛成一个
   const oneLiner = (report.one_liner || '').replace(/([\u{1F300}-\u{1FAFF}])\s*\1/gu, '$1')
-  const scoreColor =
-    (report.fundamental_score ?? 0) >= 60
-      ? 'text-emerald-600'
-      : (report.fundamental_score ?? 0) >= 40
-        ? 'text-amber-600'
-        : 'text-rose-600'
+  const integ = report.score_integrity
+  const realScore = integ?.trusted && integ.real_score != null ? integ.real_score : null
+  const scoreColor = (realScore ?? 0) >= 60 ? 'text-emerald-600' : (realScore ?? 0) >= 40 ? 'text-amber-600' : 'text-rose-600'
+  const counts = integ?.status_counts || {}
+  const missing = integ?.missing || []
 
   // 按 UZI 官方分类分组（CAT_GROUPS），每组内保持官方维度顺序
   const dimStatus = report.dim_status || {}
@@ -2312,14 +2314,41 @@ function UziReportSection({
               {report.tier}
             </span>
           )}
-          {report.fundamental_score != null && (
-            <span className={`text-[15px] font-bold font-mono ${scoreColor}`}>
-              {report.fundamental_score}
-              <span className="text-[11px] font-normal text-muted-foreground"> 分</span>
+          {realScore != null ? (
+            <span className="flex items-baseline gap-1">
+              <span className={`text-[18px] font-bold font-mono ${scoreColor}`}>{realScore}</span>
+              <span className="text-[11px] font-normal text-muted-foreground">分 · 实测口径</span>
+            </span>
+          ) : (
+            <span className="text-[12px] font-medium text-amber-700 dark:text-amber-400">
+              数据不足，不予评分
             </span>
           )}
-          {report.coverage_pct != null && (
-            <span className="text-[11px] text-muted-foreground">数据覆盖 {report.coverage_pct}%</span>
+          {integ && (
+            <span
+              className="text-[11px] text-muted-foreground"
+              title={`只统计分数确实由采集数据算出的维度；权重占全部维度的 ${
+                integ.real_weight_pct ?? 0
+              }%`}
+            >
+              实测 {integ.real_dims}/{integ.total_dims} 维 · 覆盖权重 {integ.real_weight_pct ?? 0}%
+            </span>
+          )}
+          {report.fundamental_score != null && (
+            <span
+              className="text-[10px] text-muted-foreground/75"
+              title="UZI 原始综合分：把固定占位分和未采集的默认分一起加权，不能当实测结论看"
+            >
+              （UZI 原分 {report.fundamental_score}，含无依据项）
+            </span>
+          )}
+          {report.field_coverage_pct != null && (
+            <span
+              className="text-[10px] text-muted-foreground/75"
+              title="UZI 的 coverage_pct 只统计公司名/股价/ROE/PE 等 18 个基础字段的通过率，与 19 维体检完整度无关"
+            >
+              基础字段 {report.field_coverage_pct}%
+            </span>
           )}
           {report.as_of_date && (
             <span className="text-[11px] text-muted-foreground">截至 {report.as_of_date}</span>
@@ -2442,15 +2471,25 @@ function UziReportSection({
           {job.status === 'success' && (
             <div className="flex items-center gap-1.5 flex-wrap text-emerald-700 dark:text-emerald-400">
               <span className="font-medium">调研完成，数据已刷新</span>
-              {job.result?.fundamental_score != null && (
+              {job.result?.real_dims == null ? null : job.result.trusted && job.result.real_score != null ? (
                 <span className="font-mono">
-                  {prevScoreRef.current != null && prevScoreRef.current !== job.result.fundamental_score
-                    ? `库内加权分 ${prevScoreRef.current} → ${job.result.fundamental_score}`
-                    : `库内加权分 ${job.result.fundamental_score}`}
+                  实测分 {prevScoreRef.current != null && Math.abs(prevScoreRef.current - job.result.real_score) > 0.05
+                    ? `${prevScoreRef.current} → ${job.result.real_score}`
+                    : job.result.real_score}
+                  {job.result.total_dims != null
+                    ? `（${job.result.real_dims}/${job.result.total_dims} 维有实测）`
+                    : ''}
+                </span>
+              ) : (
+                <span className="font-mono">
+                  实测维度不足，未评分
+                  {job.result.total_dims != null ? `（${job.result.real_dims}/${job.result.total_dims}）` : ''}
                 </span>
               )}
               {job.result?.coverage_pct != null && (
-                <span className="text-muted-foreground">· 覆盖 {job.result.coverage_pct}%</span>
+                <span className="text-muted-foreground" title="UZI 的字段覆盖率（18 个基础字段通过率），不是 19 维完整度">
+                  · 基础字段 {job.result.coverage_pct}%
+                </span>
               )}
               {job.elapsed_sec != null && <span className="text-muted-foreground">· 用时 {fmtElapsed(job.elapsed_sec)}</span>}
             </div>
@@ -2483,8 +2522,11 @@ function UziReportSection({
           <div className="card p-3 text-[12px] leading-relaxed text-foreground/90 whitespace-pre-line">
             {oneLiner}
           </div>
-          <div className="text-[10px] text-muted-foreground">
+          <div className="text-[10px] text-muted-foreground leading-relaxed">
             末行「🟢 安全」是下方第 18 项「杀猪盘扫描」的结论，不是买卖建议。
+            <br />
+            这段是 UZI 原文，其中「体检结果 xx 分」按全口径加权（含占位分与未采集的默认分），
+            与上方实测口径的分数不是同一个数，请以上方为准。
           </div>
         </div>
       )}
@@ -2493,12 +2535,27 @@ function UziReportSection({
         <div className="card p-3">
           <div className="flex items-center justify-between gap-2">
             <div className="text-[12px] font-medium">杀猪盘扫描（维度 18）</div>
-            <div className={`text-[13px] font-bold font-mono ${trapColorCls(trap.score ?? 0)}`}>
-              {trap.score ?? '—'}
-              <span className="text-[10px] font-normal text-muted-foreground"> /10</span>
-            </div>
+            {trapStatus?.status === 'none' ? (
+              <div className="text-[12px] font-medium text-muted-foreground">未扫描</div>
+            ) : (
+              <div className={`text-[13px] font-bold font-mono ${trapColorCls(trap.score ?? 0)}`}>
+                {trap.score ?? '—'}
+                <span className="text-[10px] font-normal text-muted-foreground"> /10</span>
+              </div>
+            )}
           </div>
-          <div className="mt-1 text-[12px] text-foreground/85">{trap.label || '—'}</div>
+          <div className="mt-1 text-[12px] text-foreground/85">
+            {trapStatus?.status === 'none' ? (
+              <span className="text-amber-700 dark:text-amber-400">
+                本次没有扫描公开帖，<b>不构成「安全」结论</b>；卡片里的 9 分是 UZI 的固定默认值。
+              </span>
+            ) : (
+              trap.label || '—'
+            )}
+          </div>
+          {trapStatus?.note && (
+            <div className="mt-1 text-[10px] text-muted-foreground leading-relaxed">{trapStatus.note}</div>
+          )}
           <div className="mt-1 text-[10px] text-muted-foreground leading-relaxed">
             查的是公开帖（小红书 / 雪球等）里有没有「老师荐股 / 进群 / 内幕消息」这类推广痕迹：
             同一信号命中 ≥2 个高危词算 1 个信号，≤1 个信号判 🟢 安全，2–3 个 🟡 注意、4–5 个 🟠 警惕、&gt;5 个 🔴 高度可疑。
@@ -2508,11 +2565,46 @@ function UziReportSection({
 
       <div className="text-[11px] text-muted-foreground leading-relaxed">
         维度体检共 {dimEntries.length} 项，按 UZI 官方分类分组。每项 0–10 分：
-        7–10 健康 · 4–6 中性 · 0–3 偏弱；顶部「综合分」是 0–100，按各维度权重加权（权重 0 的项不计入，如港股无龙虎榜）。
+        7–10 健康 · 4–6 中性 · 0–3 偏弱；顶部「实测口径分数」是 0–100，只把真有采集数据的维度按权重加权。
         <br />
-        标「占位分 / 兜底值 / 无实测」的项，分数不是由真实数据算出：UZI 对部分维度直接给固定分（如行业景气恒 7、杀猪盘恒 9），
-        没采到数据时也填默认分。这些项不计入上方分类结论。
+        显示「未评估」的项没有拿到数据，不给分数、不参与评分；标「占位分 / 兜底推断」的项分数不是由真实数据算出
+        （UZI 对部分维度直接给固定分，如行业景气恒 7、杀猪盘恒 9），同样不计入结论。
       </div>
+
+      {integ && missing.length > 0 && (
+        <div className="card p-3 border border-amber-500/40 bg-amber-500/5 space-y-1.5">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-[12px] font-medium text-amber-800 dark:text-amber-300">
+              {missing.length} 个维度没有真实数据，已从结论与评分中剔除
+            </div>
+            <button
+              type="button"
+              className="text-[10px] underline text-muted-foreground shrink-0"
+              onClick={() => setShowMissing((v) => !v)}
+            >
+              {showMissing ? '收起清单' : '看缺哪些'}
+            </button>
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            固定占位分 {counts.stub || 0} 维 · 兜底推断 {counts.weak || 0} 维 · 未采集/不适用 {counts.none || 0} 维
+          </div>
+          {showMissing && (
+            <div className="space-y-1 pt-1 border-t border-amber-500/20">
+              {missing.map((m) => (
+                <div key={m.key} className="flex items-start gap-1.5 text-[10px] leading-snug">
+                  <span className="shrink-0 px-1 rounded bg-amber-500/20 text-amber-800 dark:text-amber-300">
+                    {m.status === 'stub' ? '占位' : m.status === 'weak' ? '兜底' : '未采集'}
+                  </span>
+                  <span className="text-foreground/85 shrink-0">
+                    {UZI_DIM_META[m.key]?.title || m.label || m.key}
+                  </span>
+                  <span className="text-muted-foreground">— {m.note}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {groups.map((g) => (
         <div key={g.label} className="space-y-2">
@@ -2576,9 +2668,9 @@ const GROUP_TONE_CLS: Record<UziTone, string> = {
 }
 
 const DIM_STATUS_BADGE: Record<string, string> = {
-  stub: '占位分',
-  weak: '兜底值',
-  none: '无实测',
+  stub: '占位分·无实测依据',
+  weak: '兜底推断·不计入',
+  none: '未采集',
 }
 
 /**
@@ -2592,11 +2684,9 @@ function buildGroupSummary(
   ds: Record<string, { status: 'ok' | 'stub' | 'weak' | 'none'; note?: string }>,
 ) {
   const dimOf = (k: string) => items.find(([key]) => key === k)?.[1]
-  // 老数据没有 dim_status 时按"有分即采信"处理，保持向后兼容
-  const isOk = (k: string) => {
-    const s = ds[k]?.status
-    return s ? s === 'ok' : !!dimOf(k)
-  }
+  // 只认 status==='ok'。没有 status 标注就说明无法确认是实测，按「不采信」处理
+  // （宁可说这组没实测，也不能拿占位分当结论）。
+  const isOk = (k: string) => ds[k]?.status === 'ok'
   const sc = (k: string) => (isOk(k) ? (dimOf(k)?.score ?? null) : null)
   const okCount = items.filter(([k]) => isOk(k)).length
   const measuredText = okCount > 0 ? `实测 ${okCount}/${items.length} 项` : `${items.length} 项均无实测`
@@ -2690,6 +2780,11 @@ function UziDimCard({
   const s = dim?.score ?? 0
   const weight = typeof dim?.weight === 'number' ? dim.weight : undefined
   const badge = status ? DIM_STATUS_BADGE[status.status] : undefined
+  // 只有实测(ok)才把分数当结论展示。占位分/未采集一律显示「未评估」,
+  // 避免看到一个数字就以为它在评价这家公司。weak 是兜底推断,数字灰化保留但不计入。
+  // 没有 status 标注 ⇒ 无法确认是实测 ⇒ 按未评估处理。
+  const measured = status?.status === 'ok'
+  const lowTrust = status?.status === 'weak'
 
   return (
     <div className="card p-3">
@@ -2698,7 +2793,7 @@ function UziDimCard({
           <div className="text-[12px] font-medium leading-snug flex items-center gap-1.5 flex-wrap">
             {meta?.title || dim?.label || dimKey}
             {badge && (
-              <span className="text-[9px] px-1 py-0.5 rounded bg-accent/70 text-muted-foreground font-normal">
+              <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 font-normal">
                 {badge}
               </span>
             )}
@@ -2709,10 +2804,19 @@ function UziDimCard({
             </div>
           )}
         </div>
-        <div className={`text-[14px] font-bold font-mono shrink-0 ${trapColorCls(s)}`}>
-          {dim?.score ?? '—'}
-          <span className="text-[10px] font-normal text-muted-foreground"> /10</span>
-        </div>
+        {measured || lowTrust ? (
+          <div
+            className={`text-[14px] font-bold font-mono shrink-0 ${
+              lowTrust ? 'text-muted-foreground opacity-50' : trapColorCls(s)
+            }`}
+            title={lowTrust ? '兜底/推断值，不作为结论' : undefined}
+          >
+            {dim?.score ?? '—'}
+            <span className="text-[10px] font-normal text-muted-foreground"> /10</span>
+          </div>
+        ) : (
+          <div className="text-[11px] shrink-0 text-muted-foreground/70 font-medium">未评估</div>
+        )}
       </div>
 
       <div className="mt-1 text-[11px] text-foreground/85 leading-snug">{dim?.label || '—'}</div>
