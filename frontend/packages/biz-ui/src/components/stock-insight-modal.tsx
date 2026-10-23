@@ -712,15 +712,15 @@ export default function StockInsightModal(props: {
 
   const loadUzi = useCallback(async () => {
     if (!symbol) return
+    const wantUzi = pendingUziTabRef.current
     try {
       const r = await insightApi.uziReport<UziReport>(symbol, market)
-      const rep = r && r.exists ? r : null
-      setUziReport(rep)
-      // 列表标签进来:确有报告才切 tab;没有就留在概览
-      if (rep && pendingUziTabRef.current) setTab('uzi')
+      setUziReport(r && r.exists ? r : null)
     } catch {
       setUziReport(null)
     } finally {
+      // 有没有报告都切过去：没报告时这个 tab 就是「发起调研」入口
+      if (wantUzi) setTab('uzi')
       pendingUziTabRef.current = false
     }
   }, [symbol, market])
@@ -1405,7 +1405,7 @@ export default function StockInsightModal(props: {
                 { id: 'suggestions', label: tr('tabs.suggestions', { count: suggestions.length }) },
                 { id: 'reports', label: tr('tabs.reports', { count: reports.length }) },
                 { id: 'deep', label: deepResult ? tr('tabs.deepCount') : tr('tabs.deep') },
-                ...(uziReport ? [{ id: 'uzi', label: 'UZI 调研' }] : []),
+                { id: 'uzi', label: uziReport ? 'UZI 调研' : 'UZI 评估' },
                 { id: 'kline', label: tr('tabs.kline') },
                 { id: 'announcements', label: tr('tabs.announcements', { count: announcements.length }) },
                 { id: 'news', label: tr('tabs.news', { count: news.length }) },
@@ -1791,7 +1791,7 @@ export default function StockInsightModal(props: {
               </div>
             )}
 
-            {tab === 'uzi' && uziReport && (
+            {tab === 'uzi' && (
               <UziReportSection
                 report={uziReport}
                 symbol={symbol}
@@ -2179,7 +2179,8 @@ function UziReportSection({
   onResync,
   onDataChanged,
 }: {
-  report: UziReport
+  /** null = 这只股票还没做过 UZI 调研，面板降级为「发起调研」入口 */
+  report: UziReport | null
   symbol: string
   market: string
   onResync: () => void
@@ -2193,10 +2194,13 @@ function UziReportSection({
   const [jobError, setJobError] = useState('')
   const [showLog, setShowLog] = useState(false)
   const [showMissing, setShowMissing] = useState(false)
-  const [tier, setTier] = useState<string>(report.tier === 'lite' ? 'lite' : 'medium')
+  // 没调研过时默认 medium：lite 只采 7 维，首次调研用全维度更值
+  const [tier, setTier] = useState<string>(report?.tier === 'lite' ? 'lite' : 'medium')
   // 同一个 job_id 只触发一次刷新，避免轮询把 onResync 刷爆
   const refreshedJobRef = useRef<string | null>(null)
-  const prevScoreRef = useRef<number | null>(typeof report.real_score === 'number' ? report.real_score : null)
+  const prevScoreRef = useRef<number | null>(
+    typeof report?.real_score === 'number' ? report.real_score : null
+  )
 
   // 进面板先问一次：上次发起的调研可能还在后台跑
   useEffect(() => {
@@ -2260,7 +2264,7 @@ function UziReportSection({
   const startAnalyze = async () => {
     setStarting(true)
     setJobError('')
-    prevScoreRef.current = typeof report.real_score === 'number' ? report.real_score : null
+    prevScoreRef.current = typeof report?.real_score === 'number' ? report.real_score : null
     try {
       const r = await insightApi.uziAnalyze<{ ok: boolean; job: UziJob }>(symbol, market, tier)
       if (r?.job) setJob(r.job)
@@ -2281,21 +2285,21 @@ function UziReportSection({
     }
   }
 
-  const dims = report.dimensions || {}
+  const dims = report?.dimensions || {}
   const dimEntries = Object.entries(dims)
   const trap = dims['18_trap']
   // 维度 18 的数据性质：none = 本次没扫公开帖，此时不能把 9 分当「安全」结论
-  const trapStatus = (report.dim_status || {})['18_trap']
+  const trapStatus = (report?.dim_status || {})['18_trap']
   // UZI 拼 one-liner 时把 emoji 和自己的 emoji 叠加了（"🟢 🟢 安全"），显示前收敛成一个
-  const oneLiner = (report.one_liner || '').replace(/([\u{1F300}-\u{1FAFF}])\s*\1/gu, '$1')
-  const integ = report.score_integrity
+  const oneLiner = (report?.one_liner || '').replace(/([\u{1F300}-\u{1FAFF}])\s*\1/gu, '$1')
+  const integ = report?.score_integrity
   const realScore = integ?.trusted && integ.real_score != null ? integ.real_score : null
   const scoreColor = (realScore ?? 0) >= 60 ? 'text-emerald-600' : (realScore ?? 0) >= 40 ? 'text-amber-600' : 'text-rose-600'
   const counts = integ?.status_counts || {}
   const missing = integ?.missing || []
 
   // 按 UZI 官方分类分组（CAT_GROUPS），每组内保持官方维度顺序
-  const dimStatus = report.dim_status || {}
+  const dimStatus = report?.dim_status || {}
   const groups = UZI_DIM_GROUPS.map((g) => {
     const items = g.keys
       .filter((k) => !!dims[k])
@@ -2309,21 +2313,30 @@ function UziReportSection({
     <div className="space-y-3 text-[13px]">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          {report.tier && report.tier !== 'unknown' && (
+          {!report && (
+            <span className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[13px] font-medium">尚未做过 UZI 调研</span>
+              <span className="text-[11px] text-muted-foreground">
+                点右侧「发起调研」跑一次：联网抓数据 + 多维度打分，读完自动刷新
+              </span>
+            </span>
+          )}
+          {report?.tier && report.tier !== 'unknown' && (
             <span className="text-[11px] px-2 py-0.5 rounded bg-accent/60 text-foreground/80">
               {report.tier}
             </span>
           )}
-          {realScore != null ? (
-            <span className="flex items-baseline gap-1">
-              <span className={`text-[18px] font-bold font-mono ${scoreColor}`}>{realScore}</span>
-              <span className="text-[11px] font-normal text-muted-foreground">分 · 实测口径</span>
-            </span>
-          ) : (
-            <span className="text-[12px] font-medium text-amber-700 dark:text-amber-400">
-              数据不足，不予评分
-            </span>
-          )}
+          {report &&
+            (realScore != null ? (
+              <span className="flex items-baseline gap-1">
+                <span className={`text-[18px] font-bold font-mono ${scoreColor}`}>{realScore}</span>
+                <span className="text-[11px] font-normal text-muted-foreground">分 · 实测口径</span>
+              </span>
+            ) : (
+              <span className="text-[12px] font-medium text-amber-700 dark:text-amber-400">
+                数据不足，不予评分
+              </span>
+            ))}
           {integ && (
             <span
               className="text-[11px] text-muted-foreground"
@@ -2334,7 +2347,7 @@ function UziReportSection({
               实测 {integ.real_dims}/{integ.total_dims} 维 · 覆盖权重 {integ.real_weight_pct ?? 0}%
             </span>
           )}
-          {report.fundamental_score != null && (
+          {report?.fundamental_score != null && (
             <span
               className="text-[10px] text-muted-foreground/75"
               title="UZI 原始综合分：把固定占位分和未采集的默认分一起加权，不能当实测结论看"
@@ -2342,7 +2355,7 @@ function UziReportSection({
               （UZI 原分 {report.fundamental_score}，含无依据项）
             </span>
           )}
-          {report.field_coverage_pct != null && (
+          {report?.field_coverage_pct != null && (
             <span
               className="text-[10px] text-muted-foreground/75"
               title="UZI 的 coverage_pct 只统计公司名/股价/ROE/PE 等 18 个基础字段的通过率，与 19 维体检完整度无关"
@@ -2350,7 +2363,7 @@ function UziReportSection({
               基础字段 {report.field_coverage_pct}%
             </span>
           )}
-          {report.as_of_date && (
+          {report?.as_of_date && (
             <span className="text-[11px] text-muted-foreground">截至 {report.as_of_date}</span>
           )}
         </div>
@@ -2363,23 +2376,25 @@ function UziReportSection({
               setJobError('')
             }}
             disabled={jobRunning || starting}
-            title="联网重跑一次 UZI 调研，完成后自动刷新本页"
+            title={report ? '联网重跑一次 UZI 调研，完成后自动刷新本页' : '对这只股票跑一次 UZI 调研'}
           >
             <Sparkles className={`w-3.5 h-3.5 mr-1 ${jobRunning ? 'animate-pulse' : ''}`} />
-            {jobRunning ? '调研中…' : '重新调研'}
+            {jobRunning ? '调研中…' : report ? '重新调研' : '发起调研'}
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-[11px]"
-            onClick={handleResync}
-            disabled={resyncing || jobRunning}
-            title="只从磁盘重读已有产出，不重新跑 UZI"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${resyncing ? 'animate-spin' : ''}`} />
-            仅同步
-          </Button>
-          {report.html_available && (
+          {report && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              onClick={handleResync}
+              disabled={resyncing || jobRunning}
+              title="只从磁盘重读已有产出，不重新跑 UZI"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${resyncing ? 'animate-spin' : ''}`} />
+              仅同步
+            </Button>
+          )}
+          {report?.html_available && (
             <Button
               variant="outline"
               size="sm"
@@ -2397,7 +2412,7 @@ function UziReportSection({
       {confirmOpen && !jobRunning && (
         <div className="card p-3 space-y-2 border border-primary/30">
           <div className="text-[12px] font-medium">
-            重新调研 {symbol}？会真跑一次 UZI（联网抓数据 + 多评委打分，读完自动刷新）
+            {report ? '重新调研' : '调研'} {symbol}？会真跑一次 UZI（联网抓数据 + 多维度打分，读完自动刷新）
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] text-muted-foreground">档位</span>
@@ -2422,7 +2437,9 @@ function UziReportSection({
             ))}
           </div>
           <div className="text-[10px] text-muted-foreground leading-relaxed">
-            会强制重抓数据（不复用上一次缓存），所以比「仅同步」慢。
+            {report
+              ? '会强制重抓数据（不复用上一次缓存），所以比「仅同步」慢。'
+              : '首次调研会全新抓取数据，不复用任何历史缓存。'}
             deep 档要求 agent 介入 66 评委角色扮演，后台一键跑出来的 deep 产物不完整，故未开放。
             调研期间可以关闭弹窗，任务仍在服务端跑完；重新打开会接着显示进度。
           </div>
@@ -2517,6 +2534,24 @@ function UziReportSection({
         </div>
       )}
 
+      {!report ? (
+        <div className="card p-4 space-y-2">
+          <div className="text-[12px] font-medium">这只股票还没有 UZI 调研记录</div>
+          <div className="text-[11px] text-muted-foreground leading-relaxed">
+            UZI 是「排雷 / 尽调」层：把一只股票拆成 19 个维度逐项查（财报扎实度、估值、治理、龙虎榜、
+            事件、杀猪盘痕迹…），通过标准是<b>没查出问题</b>，不给买卖信号。
+            它和上面的 AI 分析、K 线信号是两套独立东西。
+          </div>
+          <div className="text-[11px] text-muted-foreground leading-relaxed">
+            首次调研建议 <b>medium</b> 档（全维度 + 联网搜索，约 6–15 分钟）；只想先看个大概用 lite
+            （约 3–6 分钟、7 维采集）。跑的时候可以关掉弹窗，任务在服务端继续，回来接着看进度。
+          </div>
+          <div className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
+            结果只认「真有采集数据」的维度：没拿到数据的项会明确标「未评估」，不给默认分、不参与评分。
+          </div>
+        </div>
+      ) : (
+        <>
       {oneLiner && (
         <div className="space-y-1">
           <div className="card p-3 text-[12px] leading-relaxed text-foreground/90 whitespace-pre-line">
@@ -2640,6 +2675,8 @@ function UziReportSection({
         UZI 为排雷/尽调结论（通过标准＝没查出问题），非买卖信号。
         「重新调研」会联网重跑一次并自动刷新；「仅同步」只重读磁盘已有产出。
       </div>
+        </>
+      )}
     </div>
   )
 }

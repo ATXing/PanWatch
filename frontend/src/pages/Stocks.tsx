@@ -84,6 +84,28 @@ function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
   )
 }
 
+/**
+ * 没做过 UZI 调研的股票：给一个入口标签，点进去直接落在弹窗的 UZI tab 上发起调研。
+ * 样式刻意比「有报告」的 UziTag 低调（虚线 + 无底色），避免跟已有结论抢视觉。
+ */
+function UziEmptyTag({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      title={'这只股票还没做过 UZI 调研\n点击进入 UZI 面板，可一键发起调研（排雷/尽调，非买卖信号）'}
+      onClick={(e) => {
+        e.stopPropagation()
+        e.preventDefault()
+        onOpen()
+      }}
+      className="shrink-0 align-middle ml-1.5 mr-2 inline-flex items-center gap-1 rounded-md border border-dashed border-border bg-transparent px-1.5 py-[3px] text-[10px] font-medium leading-none text-muted-foreground/80 transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
+    >
+      <span className="opacity-70 tracking-wide">UZI</span>
+      <span>评估</span>
+    </button>
+  )
+}
+
 interface AgentResult {
   success?: boolean
   message?: string
@@ -2010,7 +2032,11 @@ export default function StocksPage() {
                                     </button>
                                     {(() => {
                                       const uzi = uziMap[`${pos.symbol}|${pos.market}`]
-                                      return uzi ? <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} /> : null
+                                      return uzi ? (
+                                        <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                      ) : (
+                                        <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                      )
                                     })()}
                                     {(() => {
                                       const { suggestion, kline } = getSuggestionForStock(pos.symbol, pos.market)
@@ -2192,7 +2218,11 @@ export default function StocksPage() {
                                   </button>
                                   {(() => {
                                     const uzi = uziMap[`${pos.symbol}|${pos.market}`]
-                                    return uzi ? <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} /> : null
+                                    return uzi ? (
+                                      <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                    ) : (
+                                      <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                    )
                                   })()}
                                   {pos.trading_style && (
                                     <span className={`shrink-0 text-[9px] px-1 py-0.5 rounded ${pos.trading_style === 'short' ? 'bg-rose-500/10 text-rose-600' : pos.trading_style === 'long' ? 'bg-blue-500/10 text-blue-600' : 'bg-amber-500/10 text-amber-600'}`}>
@@ -2438,7 +2468,11 @@ export default function StocksPage() {
                           </button>
                           {(() => {
                             const uzi = uziMap[`${stock.symbol}|${stock.market}`]
-                            return uzi ? <UziTag info={uzi} onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} /> : null
+                            return uzi ? (
+                              <UziTag info={uzi} onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} />
+                            ) : (
+                              <UziEmptyTag onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} />
+                            )
                           })()}
                         </div>
                       </div>
