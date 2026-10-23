@@ -725,14 +725,18 @@ export default function StockInsightModal(props: {
     }
   }, [symbol, market])
 
-  const handleUziResync = useCallback(async () => {
-    if (!symbol) return
+  const handleUziResync = useCallback(async (): Promise<UziResyncResult> => {
+    if (!symbol) return 'error'
+    let status: UziResyncResult = 'ok'
     try {
       await insightApi.uziResync<{ ok: boolean }>(symbol, market)
-    } catch {
-      /* 磁盘无新产出时静默忽略 */
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : ''
+      // 后端磁盘无产出时抛 404(no UZI output on disk)，其余当真实错误
+      status = /404|no UZI output/i.test(msg) ? 'empty' : 'error'
     }
     await loadUzi()
+    return status
   }, [symbol, market, loadUzi])
 
   useEffect(() => {
@@ -2183,11 +2187,13 @@ function UziReportSection({
   report: UziReport | null
   symbol: string
   market: string
-  onResync: () => void
+  onResync: () => Promise<UziResyncResult> | void
   /** 调研成功后的额外回调（列表页刷新「UZI xx」标签） */
   onDataChanged?: () => void
 }) {
   const [resyncing, setResyncing] = useState(false)
+  // 「仅同步」的结果反馈：磁盘没产出时不能静默无反应
+  const [syncMsg, setSyncMsg] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null)
   const [job, setJob] = useState<UziJob | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -2278,8 +2284,19 @@ function UziReportSection({
 
   const handleResync = async () => {
     setResyncing(true)
+    setSyncMsg(null)
     try {
-      onResync()
+      const r = await onResync()
+      if (r === 'empty') {
+        setSyncMsg({
+          tone: 'warn',
+          text: `磁盘上还没找到 ${symbol} 的 UZI 产出。若刚在本地跑完，确认跑的是这只代码；否则点「${report ? '重新调研' : '发起调研'}」在面板里跑一次`,
+        })
+      } else if (r === 'error') {
+        setSyncMsg({ tone: 'warn', text: '同步失败，稍后再试一次（详情见服务端日志）' })
+      } else {
+        setSyncMsg({ tone: 'ok', text: '已从磁盘重读最新产出' })
+      }
     } finally {
       setResyncing(false)
     }
@@ -2317,7 +2334,7 @@ function UziReportSection({
             <span className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[13px] font-medium">尚未做过 UZI 调研</span>
               <span className="text-[11px] text-muted-foreground">
-                点右侧「发起调研」跑一次：联网抓数据 + 多维度打分，读完自动刷新
+                点右侧「发起调研」跑一次；已在本地/终端跑过的，点「仅同步」直接读进页面
               </span>
             </span>
           )}
@@ -2381,19 +2398,21 @@ function UziReportSection({
             <Sparkles className={`w-3.5 h-3.5 mr-1 ${jobRunning ? 'animate-pulse' : ''}`} />
             {jobRunning ? '调研中…' : report ? '重新调研' : '发起调研'}
           </Button>
-          {report && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-[11px]"
-              onClick={handleResync}
-              disabled={resyncing || jobRunning}
-              title="只从磁盘重读已有产出，不重新跑 UZI"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${resyncing ? 'animate-spin' : ''}`} />
-              仅同步
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            onClick={handleResync}
+            disabled={resyncing || jobRunning}
+            title={
+              report
+                ? '只从磁盘重读已有产出，不重新跑 UZI'
+                : '在本地/终端跑完 UZI 后，点这里把磁盘产出读进页面（不重新跑）'
+            }
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${resyncing ? 'animate-spin' : ''}`} />
+            仅同步
+          </Button>
           {report?.html_available && (
             <Button
               variant="outline"
@@ -2408,6 +2427,16 @@ function UziReportSection({
           )}
         </div>
       </div>
+
+      {syncMsg && (
+        <div
+          className={`text-[11px] leading-relaxed ${
+            syncMsg.tone === 'ok' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'
+          }`}
+        >
+          {syncMsg.text}
+        </div>
+      )}
 
       {confirmOpen && !jobRunning && (
         <div className="card p-3 space-y-2 border border-primary/30">
@@ -2527,7 +2556,7 @@ function UziReportSection({
             </div>
           )}
           {showLog && job.log_tail && job.log_tail.length > 0 && (
-            <pre className="mt-1.5 max-h-40 overflow-auto rounded bg-background/70 p-2 text-[10px] leading-snug whitespace-pre-wrap break-all text-foreground/70">
+            <pre className="mt-1.5 max-h-40 overflow-auto scrollbar rounded bg-background/70 p-2 text-[10px] leading-snug whitespace-pre-wrap break-all text-foreground/70">
               {job.log_tail.join('\n')}
             </pre>
           )}
@@ -2545,6 +2574,10 @@ function UziReportSection({
           <div className="text-[11px] text-muted-foreground leading-relaxed">
             首次调研建议 <b>medium</b> 档（全维度 + 联网搜索，约 6–15 分钟）；只想先看个大概用 lite
             （约 3–6 分钟、7 维采集）。跑的时候可以关掉弹窗，任务在服务端继续，回来接着看进度。
+          </div>
+          <div className="text-[11px] text-muted-foreground leading-relaxed">
+            已经在本地/终端跑完 UZI 的，不用重跑：点右上「<b>仅同步</b>」从磁盘读进页面即可
+            （只会读 <code className="text-[10px]">.cache/</code> 与 <code className="text-[10px]">reports/</code> 里已有的产出）。
           </div>
           <div className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
             结果只认「真有采集数据」的维度：没拿到数据的项会明确标「未评估」，不给默认分、不参与评分。
@@ -2696,6 +2729,8 @@ function fmtElapsed(sec?: number | null) {
 }
 
 type UziTone = 'good' | 'warn' | 'bad' | 'unknown'
+/** 「仅同步」的结果：ok=已从磁盘读到产出，empty=磁盘上还没有产出，error=同步失败 */
+type UziResyncResult = 'ok' | 'empty' | 'error'
 
 const GROUP_TONE_CLS: Record<UziTone, string> = {
   good: 'text-emerald-700 dark:text-emerald-400',

@@ -76,10 +76,10 @@ function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
         e.preventDefault()
         onOpen()
       }}
-      className={`shrink-0 align-middle ml-1.5 mr-2 inline-flex items-center gap-1 rounded-md border px-1.5 py-[3px] text-[10px] font-semibold leading-none shadow-sm transition-all hover:shadow hover:brightness-105 ${toneCls}`}
+      className={`shrink-0 align-middle ml-2 mr-2 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold leading-none shadow-sm transition-all hover:shadow hover:brightness-105 ${toneCls}`}
     >
       <span className="opacity-75 tracking-wide">UZI</span>
-      {score != null && <span className="font-mono">{score.toFixed(1)}</span>}
+      {score != null && <span className="font-mono tabular-nums">{score.toFixed(1)}</span>}
     </button>
   )
 }
@@ -98,7 +98,7 @@ function UziEmptyTag({ onOpen }: { onOpen: () => void }) {
         e.preventDefault()
         onOpen()
       }}
-      className="shrink-0 align-middle ml-1.5 mr-2 inline-flex items-center gap-1 rounded-md border border-dashed border-border bg-transparent px-1.5 py-[3px] text-[10px] font-medium leading-none text-muted-foreground/80 transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
+      className="shrink-0 align-middle ml-2 mr-2 inline-flex items-center gap-1.5 rounded-md border border-dashed border-border bg-transparent px-2 py-1 text-[11px] font-medium leading-none text-muted-foreground/80 transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
     >
       <span className="opacity-70 tracking-wide">UZI</span>
       <span>评估</span>
