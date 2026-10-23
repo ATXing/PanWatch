@@ -44,12 +44,12 @@ function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
   const score = typeof info.fundamental_score === 'number' ? info.fundamental_score : null
   const toneCls =
     score == null
-      ? 'bg-accent text-muted-foreground'
+      ? 'bg-accent text-muted-foreground border-border'
       : score >= 70
-        ? 'bg-violet-500/15 text-violet-600 dark:text-violet-300'
+        ? 'bg-violet-500/20 text-violet-700 dark:text-violet-200 border-violet-500/50'
         : score >= 60
-          ? 'bg-violet-500/10 text-violet-600 dark:text-violet-300'
-          : 'bg-amber-500/15 text-amber-600 dark:text-amber-300'
+          ? 'bg-violet-500/15 text-violet-700 dark:text-violet-200 border-violet-500/40'
+          : 'bg-amber-500/20 text-amber-700 dark:text-amber-200 border-amber-500/50'
   const fmtDate = (d?: string) =>
     d && /^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d || ''
   const brief = (info.one_liner || '').split('\n')[0].replace(/🟢\s*/g, '').trim()
@@ -70,9 +70,9 @@ function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
         e.preventDefault()
         onOpen()
       }}
-      className={`shrink-0 align-middle ml-1.5 mr-1.5 inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-medium leading-none transition-colors hover:brightness-110 ${toneCls}`}
+      className={`shrink-0 align-middle ml-1.5 mr-2 inline-flex items-center gap-1 rounded-md border px-1.5 py-[3px] text-[10px] font-semibold leading-none shadow-sm transition-all hover:shadow hover:brightness-105 ${toneCls}`}
     >
-      <span className="opacity-70">UZI</span>
+      <span className="opacity-75 tracking-wide">UZI</span>
       {score != null && <span className="font-mono">{score.toFixed(1)}</span>}
     </button>
   )
