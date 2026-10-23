@@ -34,7 +34,7 @@ def _fetch_row(symbol: str, market: str):
         cur.execute(
             """
             SELECT symbol, market, tier, as_of_date, fundamental_score,
-                   one_liner, coverage_pct, dimensions_json, html_path
+                   one_liner, coverage_pct, dimensions_json, html_path, dim_status_json
             FROM uzi_reports WHERE symbol=? AND market=?
             """,
             (symbol, market),
@@ -59,8 +59,10 @@ def get_uzi_report(symbol: str, market: str, db: Session = Depends(get_db)):
         coverage,
         dims_json,
         html_path,
+        dim_status_json,
     ) = row
     dims = json.loads(dims_json) if dims_json else {}
+    dim_status = json.loads(dim_status_json) if dim_status_json else {}
     return {
         "exists": True,
         "symbol": symbol,
@@ -71,6 +73,7 @@ def get_uzi_report(symbol: str, market: str, db: Session = Depends(get_db)):
         "one_liner": one_liner,
         "coverage_pct": coverage,
         "dimensions": dims,
+        "dim_status": dim_status,
         "html_available": bool(html_path and os.path.exists(html_path)),
     }
 

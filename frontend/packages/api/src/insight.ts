@@ -84,6 +84,12 @@ export interface UziDimension {
   reasons_fail: string[]
 }
 
+/** 维度数据性质: ok=真实采集算出 / stub=UZI 固定占位分 / weak=兜底推断 / none=未采集或不适用 */
+export interface UziDimStatus {
+  status: 'ok' | 'stub' | 'weak' | 'none'
+  note?: string
+}
+
 export interface UziReport {
   exists: boolean
   symbol?: string
@@ -94,6 +100,7 @@ export interface UziReport {
   one_liner?: string
   coverage_pct?: number
   dimensions?: Record<string, UziDimension>
+  dim_status?: Record<string, UziDimStatus>
   html_available?: boolean
 }
 

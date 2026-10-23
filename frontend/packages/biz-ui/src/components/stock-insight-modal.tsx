@@ -2193,12 +2193,13 @@ function UziReportSection({
         : 'text-rose-600'
 
   // 按 UZI 官方分类分组（CAT_GROUPS），每组内保持官方维度顺序
-  const groups = UZI_DIM_GROUPS.map((g) => ({
-    label: g.label,
-    items: g.keys
+  const dimStatus = report.dim_status || {}
+  const groups = UZI_DIM_GROUPS.map((g) => {
+    const items = g.keys
       .filter((k) => !!dims[k])
-      .map((k) => [k, dims[k]] as [string, (typeof dims)[string]]),
-  })).filter((g) => g.items.length > 0)
+      .map((k) => [k, dims[k]] as [string, (typeof dims)[string]])
+    return { label: g.label, items, summary: buildGroupSummary(g.label, items, dimStatus) }
+  }).filter((g) => g.items.length > 0)
   const knownKeys = new Set(UZI_DIM_GROUPS.flatMap((g) => g.keys))
   const unknownItems = dimEntries.filter(([k]) => !knownKeys.has(k))
 
@@ -2281,14 +2282,25 @@ function UziReportSection({
       <div className="text-[11px] text-muted-foreground leading-relaxed">
         维度体检共 {dimEntries.length} 项，按 UZI 官方分类分组。每项 0–10 分：
         7–10 健康 · 4–6 中性 · 0–3 偏弱；顶部「综合分」是 0–100，按各维度权重加权（权重 0 的项不计入，如港股无龙虎榜）。
+        <br />
+        标「占位分 / 兜底值 / 无实测」的项，分数不是由真实数据算出：UZI 对部分维度直接给固定分（如行业景气恒 7、杀猪盘恒 9），
+        没采到数据时也填默认分。这些项不计入上方分类结论。
       </div>
 
       {groups.map((g) => (
         <div key={g.label} className="space-y-2">
-          <div className="text-[11px] font-medium text-foreground/70 pt-1">{g.label}</div>
+          <div className="pt-1">
+            <div className="flex items-baseline justify-between gap-2 flex-wrap">
+              <div className="text-[11px] font-medium text-foreground/70">{g.label}</div>
+              <div className="text-[10px] text-muted-foreground">{g.summary.measuredText}</div>
+            </div>
+            <div className={`text-[12px] leading-snug mt-0.5 ${GROUP_TONE_CLS[g.summary.tone]}`}>
+              {g.summary.text}
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {g.items.map(([key, dim]) => (
-              <UziDimCard key={key} dimKey={key} dim={dim} />
+              <UziDimCard key={key} dimKey={key} dim={dim} status={dimStatus[key]} />
             ))}
           </div>
         </div>
@@ -2299,7 +2311,7 @@ function UziReportSection({
           <div className="text-[11px] font-medium text-foreground/70 pt-1">其他维度</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {unknownItems.map(([key, dim]) => (
-              <UziDimCard key={key} dimKey={key} dim={dim} />
+              <UziDimCard key={key} dimKey={key} dim={dim} status={dimStatus[key]} />
             ))}
           </div>
         </div>
@@ -2317,22 +2329,143 @@ function trapColorCls(s: number) {
   return s >= 7 ? 'text-emerald-600' : s >= 4 ? 'text-amber-600' : 'text-rose-600'
 }
 
+type UziTone = 'good' | 'warn' | 'bad' | 'unknown'
+
+const GROUP_TONE_CLS: Record<UziTone, string> = {
+  good: 'text-emerald-700 dark:text-emerald-400',
+  warn: 'text-amber-700 dark:text-amber-400',
+  bad: 'text-rose-700 dark:text-rose-400',
+  unknown: 'text-muted-foreground',
+}
+
+const DIM_STATUS_BADGE: Record<string, string> = {
+  stub: '占位分',
+  weak: '兜底值',
+  none: '无实测',
+}
+
+/**
+ * 分类汇总结论。只采信 status==='ok'（真实采集并据此打分）的维度；
+ * UZI 的占位分（如 7_industry 恒 7、18_trap 恒 9）和未采集到的默认分一律不进结论，
+ * 否则会给出不可核实的"健康感"。
+ */
+function buildGroupSummary(
+  label: string,
+  items: [string, { score?: number; label?: string } | undefined][],
+  ds: Record<string, { status: 'ok' | 'stub' | 'weak' | 'none'; note?: string }>,
+) {
+  const dimOf = (k: string) => items.find(([key]) => key === k)?.[1]
+  // 老数据没有 dim_status 时按"有分即采信"处理，保持向后兼容
+  const isOk = (k: string) => {
+    const s = ds[k]?.status
+    return s ? s === 'ok' : !!dimOf(k)
+  }
+  const sc = (k: string) => (isOk(k) ? (dimOf(k)?.score ?? null) : null)
+  const okCount = items.filter(([k]) => isOk(k)).length
+  const measuredText = okCount > 0 ? `实测 ${okCount}/${items.length} 项` : `${items.length} 项均无实测`
+  const res = (text: string, tone: UziTone) => ({ text, tone, measuredText })
+
+  const noData = () =>
+    res(`本组 ${items.length} 项都没有可用实测（分数为占位/默认/兜底值），不作结论`, 'unknown')
+
+  switch (label) {
+    case '财务质量': {
+      const fin = sc('1_financials')
+      const val = sc('10_valuation')
+      if (fin == null && val == null) return noData()
+      const finW = fin == null ? null : fin >= 8 ? '盈利质量扎实' : fin >= 6 ? '盈利质量尚可' : '盈利质量偏弱'
+      const valW = val == null ? null : val >= 8 ? '估值便宜' : val >= 6 ? '估值合理' : val >= 4 ? '估值中性' : '估值偏贵'
+      if (fin != null && val != null) {
+        if (fin >= 7 && val >= 7) return res('盈利扎实且估值不贵，财务面是明显加分项', 'good')
+        if (fin >= 7 && val < 4) return res('生意扎实但估值偏贵，好公司贵价格，追高不划算', 'bad')
+        if (fin < 4 && val >= 7) return res('便宜但盈利质量偏弱，要当心价值陷阱', 'bad')
+        if (fin < 4 && val < 4) return res('盈利与估值双弱，是本组硬伤', 'bad')
+        return res(`${finW}、${valW}，没有突出亮点也没有硬伤`, 'warn')
+      }
+      return res(`${finW || valW}（另一项未采到实测）`, 'warn')
+    }
+
+    case '市场与资金': {
+      const kline = sc('2_kline')
+      const flow = sc('12_capital_flow')
+      if (kline == null && flow == null) return noData()
+      const kW = kline == null ? null : kline >= 7 ? '技术面偏强' : kline >= 5 ? '技术面中性' : '技术面偏弱'
+      const fW = flow == null ? null : flow >= 7 ? '资金面较强' : flow >= 5 ? '资金面中性' : '资金面较弱'
+      const tone: UziTone = kline == null ? 'warn' : kline >= 7 ? 'good' : kline >= 4 ? 'warn' : 'bad'
+      return res(`${[kW, fW].filter(Boolean).join('、')}——只是当下姿态，不预测未来，不构成买卖依据`, tone)
+    }
+
+    case '行业与产业链': {
+      const okKeys = items.filter(([k]) => isOk(k)).map(([k]) => UZI_DIM_META[k]?.title || k)
+      if (okKeys.length === 0) return noData()
+      const peers = sc('4_peers')
+      const ind = sc('7_industry')
+      if (peers != null) {
+        return res(`有实测的是${okKeys.join('、')}；同行对比 ${peers}/10，其余为占位或未采到`, peers >= 7 ? 'good' : 'warn')
+      }
+      return res(`仅 ${okKeys.join('、')} 有实测，其余为占位或未采到，不足以判断赛道情况`, ind != null && ind >= 7 ? 'warn' : 'unknown')
+    }
+
+    case '公司与治理': {
+      const gov = sc('11_governance')
+      const ev = sc('15_events')
+      if (gov == null && ev == null) return noData()
+      const govW = gov == null ? null : gov >= 7 ? '治理记录干净' : gov >= 5 ? '治理基本正常' : '治理有明显瑕疵'
+      const evW = ev == null ? null : ev >= 7 ? '近期有催化事件' : '近期无明显催化'
+      const tone: UziTone = gov == null ? 'warn' : gov < 5 ? 'bad' : gov >= 7 ? 'good' : 'warn'
+      return res(`${[govW, evW].filter(Boolean).join('、')}（研报观点覆盖普遍偏少，别当共识）`, tone)
+    }
+
+    case '宏观与政策':
+      if (okCount === 0) {
+        return res('宏观与政策在 UZI 里都是固定占位分（未接实测数据），对本股不构成任何判断', 'unknown')
+      }
+      return res('部分项有实测，但 UZI 的宏观/政策多为推断值，参考价值有限', 'warn')
+
+    case '安全与情绪': {
+      const trap = ds['18_trap']
+      const sent = sc('17_sentiment')
+      if (trap?.status === 'none') {
+        return res('杀猪盘本次没扫描，9 分是默认值——不能据此认为安全', 'bad')
+      }
+      const sentW = sent == null ? '' : sent >= 8 ? '，舆情较热需防过热' : '，舆情冷清'
+      if (trap?.status === 'stub' || trap?.status === 'ok') {
+        return res(`杀猪盘真跑过：${trap?.note || '未发现推广痕迹'}${sentW}`, 'good')
+      }
+      return res(`杀猪盘无实测结论${sentW}`, 'unknown')
+    }
+
+    default:
+      return okCount === 0 ? noData() : res(`实测 ${okCount}/${items.length} 项达到评估条件`, 'warn')
+  }
+}
+
 function UziDimCard({
   dimKey,
   dim,
+  status,
 }: {
   dimKey: string
   dim: { score?: number; weight?: number; label?: string; reasons_pass?: string[]; reasons_fail?: string[] } | undefined
+  status?: { status: 'ok' | 'stub' | 'weak' | 'none'; note?: string }
 }) {
   const meta = UZI_DIM_META[dimKey]
   const s = dim?.score ?? 0
   const weight = typeof dim?.weight === 'number' ? dim.weight : undefined
+  const badge = status ? DIM_STATUS_BADGE[status.status] : undefined
 
   return (
     <div className="card p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[12px] font-medium leading-snug">{meta?.title || dim?.label || dimKey}</div>
+          <div className="text-[12px] font-medium leading-snug flex items-center gap-1.5 flex-wrap">
+            {meta?.title || dim?.label || dimKey}
+            {badge && (
+              <span className="text-[9px] px-1 py-0.5 rounded bg-accent/70 text-muted-foreground font-normal">
+                {badge}
+              </span>
+            )}
+          </div>
           {meta && (
             <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">
               看 {meta.kpis} · {weight && weight > 0 ? `权重 ${weight}` : '不计入综合分'}
@@ -2346,6 +2479,9 @@ function UziDimCard({
       </div>
 
       <div className="mt-1 text-[11px] text-foreground/85 leading-snug">{dim?.label || '—'}</div>
+      {status?.note && (
+        <div className="mt-1 text-[10px] text-amber-700 dark:text-amber-400 leading-snug">{status.note}</div>
+      )}
       {meta && (
         <div className="mt-1 text-[10px] text-muted-foreground leading-snug">{meta.why}</div>
       )}

@@ -110,6 +110,75 @@ def _read_one_liner(path: str) -> str:
     return "\n".join(lines).strip()
 
 
+# ── 维度数据性质判定 ───────────────────────────────────────────────────────
+# 背景:UZI 打分函数 lib/pipeline/score_fns.py 里,**部分维度根本不读采集结果,
+# 直接返回固定分**(注释自称 stub)。例如 7_industry 恒 7 分、18_trap 恒 9 分
+# "🟢 未发现推广痕迹"。而 lite 档压根不采集 4_peers/5_chain/6_research/
+# 12_capital_flow/14_moat/17_sentiment/18_trap/19_contests,打分层照样给默认分。
+# 若面板把这类分数当结论展示,等于给出不可核实的"安全感"。
+#
+# 因此同步时按 raw_data.json 的真实采集情况给每维打标:
+#   ok    = 有真实采集,分数由数据算出
+#   stub  = 固定占位分(score_fns 硬编码,不随标的改变)
+#   weak  = 有采集但是兜底/推断值,或采到了但无结果
+#   none  = 未采集 / 该市场不适用
+_STUB_DIMS = {
+    # score_fns.py 中直接 return 固定分的维度(行号见注释)
+    "3_macro": "score_fns.py:113 · 恒 6",
+    "7_industry": "score_fns.py:167 · 恒 7",
+    "8_materials": "score_fns.py:170 · 恒 6",
+    "9_futures": "score_fns.py:173 · 恒 5",
+    "13_policy": "score_fns.py:225 · 恒 6",
+    "14_moat": "score_fns.py:228 · 恒 6",
+    "18_trap": "score_fns.py:261 · 恒 9(未扫描也给「安全」)",
+}
+_NO_DATA_LABELS = (
+    "无同行数据",
+    "数据不完整",
+    "数据稀少",
+    "无强关联期货品种",
+    "需定性评估",
+    "市场不适用",
+    "证据未核验",
+    "无数据",
+)
+
+
+def _dim_status(dims: dict, raw_dims: dict) -> dict[str, dict]:
+    """给每个已打分维度标注数据性质,返回 {dimkey: {status, note?}}。"""
+    out: dict[str, dict] = {}
+    for key, dim in dims.items():
+        if not isinstance(dim, dict):
+            continue
+        weight = dim.get("weight")
+        label = str(dim.get("label") or "")
+        raw = raw_dims.get(key)
+        has_raw = isinstance(raw, dict) and bool(raw.get("data"))
+        fallback = isinstance(raw, dict) and raw.get("fallback") is True
+
+        if weight == 0:
+            out[key] = {"status": "none", "note": "该市场不适用"}
+        elif key == "18_trap":
+            # 特例:打分层恒给 9 分「未发现推广痕迹」,但真实扫描结论在 raw 里,
+            # 两者可能冲突(命中风险信号时 raw 会降分,dimensions 仍是 9)。
+            data = (raw or {}).get("data") or {}
+            level = data.get("trap_level")
+            hit = data.get("signals_hit")
+            if has_raw and level:
+                out[key] = {"status": "stub", "note": f"{hit or '—'} 命中 · {level}"}
+            else:
+                out[key] = {"status": "none", "note": "未扫描 · 9 分是默认值，不代表已排查"}
+        elif key in _STUB_DIMS:
+            out[key] = {"status": "stub", "note": "UZI 此项为固定占位分"}
+        elif not has_raw:
+            out[key] = {"status": "none", "note": "本次未采集，分数为默认值"}
+        elif fallback or any(s in label for s in _NO_DATA_LABELS):
+            out[key] = {"status": "weak", "note": "兜底/推断值，参考价值低"}
+        else:
+            out[key] = {"status": "ok"}
+    return out
+
+
 def _ensure_table(conn: sqlite3.Connection):
     conn.execute(
         """
@@ -124,6 +193,7 @@ def _ensure_table(conn: sqlite3.Connection):
             one_liner TEXT,
             coverage_pct REAL,
             dimensions_json TEXT,
+            dim_status_json TEXT,
             report_dir TEXT,
             html_path TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -131,6 +201,10 @@ def _ensure_table(conn: sqlite3.Connection):
         )
         """
     )
+    # 兼容旧库:dim_status_json 是后加的列
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(uzi_reports)").fetchall()}
+    if "dim_status_json" not in cols:
+        conn.execute("ALTER TABLE uzi_reports ADD COLUMN dim_status_json TEXT")
 
 
 def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
@@ -148,6 +222,7 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
     tier = rd.get("_profile_depth") or "unknown"
     score = d.get("fundamental_score")
     dims = d.get("dimensions", {})
+    dim_status = _dim_status(dims, rd.get("dimensions") or {})
     integrity = rd.get("_integrity") or {}
     coverage = integrity.get("coverage_pct") if isinstance(integrity, dict) else None
 
@@ -176,8 +251,9 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
             """
             INSERT INTO uzi_reports
                 (symbol, market, ticker_raw, tier, as_of_date, fundamental_score,
-                 one_liner, coverage_pct, dimensions_json, report_dir, html_path, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                 one_liner, coverage_pct, dimensions_json, dim_status_json,
+                 report_dir, html_path, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
             ON CONFLICT(symbol, market) DO UPDATE SET
                 ticker_raw=excluded.ticker_raw,
                 tier=excluded.tier,
@@ -186,6 +262,7 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                 one_liner=excluded.one_liner,
                 coverage_pct=excluded.coverage_pct,
                 dimensions_json=excluded.dimensions_json,
+                dim_status_json=excluded.dim_status_json,
                 report_dir=excluded.report_dir,
                 html_path=excluded.html_path,
                 created_at=CURRENT_TIMESTAMP
@@ -200,6 +277,7 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                 one_liner,
                 coverage,
                 json.dumps(dims, ensure_ascii=False),
+                json.dumps(dim_status, ensure_ascii=False),
                 rdir or "",
                 html_path,
             ),
