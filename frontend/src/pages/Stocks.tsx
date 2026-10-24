@@ -71,8 +71,9 @@ function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
     .filter(Boolean)
     .join('\n')
   return (
-    // 时间放在框外下方，跟 AI 建议/指标徽章的「徽章 + 下方时间」排版保持一致
-    <span className="shrink-0 inline-flex flex-col items-start gap-0.5">
+    // 时间放在框外下方，跟 AI 建议/指标徽章的「徽章 + 下方时间」排版保持一致；
+    // align-bottom 让整块贴行底，同一行里几个徽章的「框下时间」才会在同一底线
+    <span className="shrink-0 align-bottom ml-2 mr-2 inline-flex flex-col items-start gap-0.5">
       <button
         type="button"
         title={tip}
@@ -99,19 +100,25 @@ function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
  */
 function UziEmptyTag({ onOpen }: { onOpen: () => void }) {
   return (
-    <button
-      type="button"
-      title={'这只股票还没做过 UZI 调研\n点击进入 UZI 面板，可一键发起调研（排雷/尽调，非买卖信号）'}
-      onClick={(e) => {
-        e.stopPropagation()
-        e.preventDefault()
-        onOpen()
-      }}
-      className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-dashed border-border bg-transparent px-2 py-1.5 text-[12px] font-medium leading-none text-muted-foreground/80 transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
-    >
-      <span className="opacity-70 tracking-wide">UZI</span>
-      <span>评估</span>
-    </button>
+    <span className="shrink-0 align-bottom ml-2 mr-2 inline-flex flex-col items-start gap-0.5">
+      <button
+        type="button"
+        title={'这只股票还没做过 UZI 调研\n点击进入 UZI 面板，可一键发起调研（排雷/尽调，非买卖信号）'}
+        onClick={(e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          onOpen()
+        }}
+        className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-dashed border-border bg-transparent px-2 py-1.5 text-[12px] font-medium leading-none text-muted-foreground/80 transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
+      >
+        <span className="opacity-70 tracking-wide">UZI</span>
+        <span>评估</span>
+      </button>
+      {/* 占位行：与 UziTag 时间行等高，同排徽章的框底才能落在同一水平线 */}
+      <span aria-hidden className="invisible text-[10px] leading-none">
+        00/00 00:00
+      </span>
+    </span>
   )
 }
 
@@ -2027,7 +2034,9 @@ export default function StocksPage() {
                                   }}
                                   className={`group hover:bg-accent/30 transition-colors ${i > 0 ? 'border-t border-border/20' : ''} ${draggingPositionId === pos.id ? 'opacity-60' : ''}`}
                                 >
-                                  <td className="px-4 py-2.5">
+                                  {/* 宽屏不换行：UZI / AI / 指标三个徽章都留在名字这一行，框下时间才在同一底线；
+                                      窄屏（<1480px）保留折行，12 列本来就不够放 */}
+                                  <td className="px-4 py-2.5 min-[1480px]:whitespace-nowrap">
                                     <span className={`text-[9px] px-1 py-0.5 rounded mr-1.5 ${badge.style}`}>{badge.label}</span>
                                     <span className="font-mono text-[12px] font-semibold text-foreground">
                                       {pos.symbol}
@@ -2039,20 +2048,19 @@ export default function StocksPage() {
                                       {pos.name}
                                       {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
                                     </button>
-                                    {/* 名字下面一行放所有徽章：UZI / AI 建议 / 技术指标。
-                                        三者同一个 flex 行，各自「框 + 框下时间」，框下时间才会底对齐 */}
-                                    <div className="mt-1 flex flex-wrap items-start gap-x-2 gap-y-1">
-                                      {(() => {
-                                        const uzi = uziMap[`${pos.symbol}|${pos.market}`]
-                                        return uzi ? (
-                                          <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
-                                        ) : (
-                                          <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
-                                        )
-                                      })()}
-                                      {(() => {
-                                        const { suggestion, kline } = getSuggestionForStock(pos.symbol, pos.market)
-                                        return (suggestion || kline) ? (
+                                    {(() => {
+                                      const uzi = uziMap[`${pos.symbol}|${pos.market}`]
+                                      return uzi ? (
+                                        <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                      ) : (
+                                        <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                      )
+                                    })()}
+                                    {(() => {
+                                      const { suggestion, kline } = getSuggestionForStock(pos.symbol, pos.market)
+                                      return (suggestion || kline) ? (
+                                        // align-bottom：整块贴着行底，框下时间与 UZI 的框下时间同一底线
+                                        <span className="align-bottom inline-flex ml-2 mr-2">
                                           <SuggestionBadge
                                             suggestion={suggestion}
                                             stockName={pos.name}
@@ -2061,9 +2069,9 @@ export default function StocksPage() {
                                             market={pos.market}
                                             hasPosition={true}
                                           />
-                                        ) : null
-                                      })()}
-                                    </div>
+                                        </span>
+                                      ) : null
+                                    })()}
                                   </td>
                                   <td title={quoteHint(pos)} className={`px-4 py-2.5 text-right font-mono text-[12px] ${changeColor}`}>
                                     {pos.current_price != null ? <span>{formatQuotePrice(pos.current_price, pos.asset_type, pos.market)}{isForeign ? (pos.market === 'HK' ? ' HKD' : ' USD') : ''}</span> : '—'}
@@ -2227,6 +2235,14 @@ export default function StocksPage() {
                                     {pos.name}
                                     {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
                                   </button>
+                                  {(() => {
+                                    const uzi = uziMap[`${pos.symbol}|${pos.market}`]
+                                    return uzi ? (
+                                      <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                    ) : (
+                                      <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                    )
+                                  })()}
                                   {pos.trading_style && (
                                     <span className={`shrink-0 text-[9px] px-1 py-0.5 rounded ${pos.trading_style === 'short' ? 'bg-rose-500/10 text-rose-600' : pos.trading_style === 'long' ? 'bg-blue-500/10 text-blue-600' : 'bg-amber-500/10 text-amber-600'}`}>
                                       {pos.trading_style === 'short' ? stockT('stocksPage.messages.shortStyleLabel') : pos.trading_style === 'long' ? stockT('stocksPage.messages.longStyleLabel') : stockT('stocksPage.messages.swingStyleLabel')}
@@ -2238,29 +2254,21 @@ export default function StocksPage() {
                                   <span className="text-[11px] ml-1">{pos.change_pct != null ? `${pos.change_pct >= 0 ? '+' : ''}${pos.change_pct.toFixed(2)}%` : '—'}</span>
                                 </div>
                               </div>
-                              {/* Row 2: UZI + AI 建议 / 指标徽章同一行，框下时间才底对齐 */}
+                              {/* Row 2 (Suggestion badge, dedicated row to avoid wrapping mess) */}
                               {(() => {
                                 const { suggestion, kline } = getSuggestionForStock(pos.symbol, pos.market)
-                                const uzi = uziMap[`${pos.symbol}|${pos.market}`]
-                                return (
-                                  <div className="mb-2 flex flex-wrap items-start gap-x-2 gap-y-1">
-                                    {uzi ? (
-                                      <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
-                                    ) : (
-                                      <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
-                                    )}
-                                    {(suggestion || kline) && (
-                                      <SuggestionBadge
-                                        suggestion={suggestion}
-                                        stockName={pos.name}
-                                        stockSymbol={pos.symbol}
-                                        kline={kline}
-                                        market={pos.market}
-                                        hasPosition={true}
-                                      />
-                                    )}
+                                return (suggestion || kline) ? (
+                                  <div className="mb-2">
+                                    <SuggestionBadge
+                                      suggestion={suggestion}
+                                      stockName={pos.name}
+                                      stockSymbol={pos.symbol}
+                                      kline={kline}
+                                      market={pos.market}
+                                      hasPosition={true}
+                                    />
                                   </div>
-                                )
+                                ) : null
                               })()}
                               {/* Row 3: Stats grid (4 cols, whitespace-nowrap to prevent "万" wrapping) */}
                               <div className="grid grid-cols-4 gap-2 text-[11px]">
@@ -2477,6 +2485,14 @@ export default function StocksPage() {
                             {stock.name}
                             {stock.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
                           </button>
+                          {(() => {
+                            const uzi = uziMap[`${stock.symbol}|${stock.market}`]
+                            return uzi ? (
+                              <UziTag info={uzi} onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} />
+                            ) : (
+                              <UziEmptyTag onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} />
+                            )
+                          })()}
                         </div>
                       </div>
                       <div className="text-right">
@@ -2489,16 +2505,7 @@ export default function StocksPage() {
                       </div>
                     </div>
 
-                    {/* UZI 与建议徽章同一行：框下时间才会底对齐 */}
-                    <div className="mt-2 flex flex-wrap items-start gap-x-2 gap-y-1">
-                      {(() => {
-                        const uzi = uziMap[`${stock.symbol}|${stock.market}`]
-                        return uzi ? (
-                          <UziTag info={uzi} onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} />
-                        ) : (
-                          <UziEmptyTag onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} />
-                        )
-                      })()}
+                    <div className="mt-2">
                       {(suggestion || kline) ? (
                         <SuggestionBadge
                           suggestion={suggestion}
@@ -2509,7 +2516,7 @@ export default function StocksPage() {
                           hasPosition={false}
                         />
                       ) : (
-                        <div className="text-[11px] text-muted-foreground/70 py-1">{stockT('stocksPage.messages.noAnalysis')}</div>
+                        <div className="text-[11px] text-muted-foreground/70 py-2">{stockT('stocksPage.messages.noAnalysis')}</div>
                       )}
                     </div>
 
