@@ -111,18 +111,18 @@ def _read_one_liner(path: str) -> str:
 
 
 # ── 维度数据性质判定 ───────────────────────────────────────────────────────
-# 背景:UZI 打分函数 lib/pipeline/score_fns.py 里,部分定性维度曾经**根本不读采集结果,
-# 直接 return 常量分**(7_industry 恒 7、18_trap 恒 9、13_policy/14_moat/17_sentiment
-# 恒 6 等)。2026-10-24 已全部改成数据驱动:拿到具体字段才加减分,拿不到就给中性 5 分
-# 并在 label 里明写「未取得」。
+# 背景:UZI 打分函数 lib/pipeline/score_fns.py 里,部分定性维度**不读采集结果,
+# 直接 return 常量分**(3_macro 恒 6、7_industry 恒 7、8_materials 恒 6、
+# 9_futures 恒 5、13_policy 恒 6、14_moat 恒 6、17_sentiment 6+分档、18_trap 恒 9)。
 #
-# 因此同步时按 raw_data.json 的真实采集情况给每维打标:
-#   ok    = 有真实采集,分数由数据算出
-#   stub  = 定性维但没实测数据 → 中性 5 分占位(label 里写「未取得/未评估/未取证」)
+# 2026-10-24 定案:**打分口径不动**（改口径等于换尺子，历史分数不可比）。
+# 数据缺失一律靠「补数 + 标注」解决:label 里并列写出实测证据,
+# 拿不到就明写「未取得实测 / 未取证 / 口径未取得」,同步时按 label 打标:
+#   ok    = 有真实采集
 #   weak  = 有采集但是兜底/推断值,或采到了但无结果
 #   none  = 未采集 / 该市场不适用
 #
-# 定性维清单保留,用途从「跳过判定」变成「必须确认 label 是否说了未取得」。
+# 定性维清单,用途是「必须确认 label 是否说了未取得」。
 _QUAL_DIMS = {
     "3_macro",
     "7_industry",
@@ -133,7 +133,7 @@ _QUAL_DIMS = {
     "17_sentiment",
     "18_trap",
 }
-# label 里出现这些词 = 这维其实是空壳,分数只是中性占位
+# label 里出现这些词 = 这维其实是空壳,分数只是原口径默认分
 _QUAL_EMPTY_MARKERS = (
     "未取得",
     "未评估",
@@ -150,6 +150,7 @@ _NO_DATA_LABELS = (
     "市场不适用",
     "证据未核验",
     "无数据",
+    "口径未取得",
 )
 
 # 真实口径综合分的最低门槛:达到才敢给数字,否则直说「数据不足,不予评分」
@@ -268,14 +269,14 @@ def _dim_status(dims: dict, raw_dims: dict) -> dict[str, dict]:
             else:
                 out[key] = {
                     "status": "none",
-                    "note": "没扫到公开帖，UZI 按中性 5 分占位，不构成「安全」结论",
+                    "note": "没扫到公开帖，分数按原口径默认分计，不构成「安全」结论，且不计入可信分",
                 }
         elif key in _QUAL_DIMS:
             # 定性维:label 自己说「未取得」就当空壳;有内容则按 fallback 判 weak/ok
             if any(m in label for m in _QUAL_EMPTY_MARKERS):
                 out[key] = {
                     "status": "none",
-                    "note": "该维无实测数据，UZI 按中性 5 分占位，不计入结论",
+                    "note": "该维无实测数据，分数按原口径默认分计，不计入可信分",
                 }
             elif fallback:
                 out[key] = {"status": "weak", "note": "兜底/推断值，仅作定性参考"}
