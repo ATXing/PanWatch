@@ -402,7 +402,9 @@ export function SuggestionBadge({
 
   return (
     <>
-      <div className="inline-flex items-start gap-1">
+      {/* gap-2（8px）：AI 与「指标」两栈之间原来是 4px，两枚徽章下的时间戳
+          （「…过期」紧接「10/24 12:53」）几乎粘连，加宽后各自留出呼吸位 */}
+      <div className="inline-flex items-start gap-2">
         <div className="inline-flex flex-col items-start gap-0.5">
           <AiSuggestionBadge
             {...suggestion}
