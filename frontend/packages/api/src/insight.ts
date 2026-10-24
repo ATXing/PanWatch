@@ -170,6 +170,8 @@ export interface UziListItem {
   coverage_pct?: number
   field_coverage_pct?: number
   html_available?: boolean
+  /** 报告实际产出时刻（ISO，带时区）。列表标签下方显示用 */
+  report_time?: string | null
 }
 
 /** 后台调研任务（/uzi/analyze 与 /uzi/job 返回） */

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -27,6 +28,32 @@ router = APIRouter()
 public_router = APIRouter()
 
 _PANWATCH_DB = uzi_sync.PANWATCH_DB
+
+
+def _report_time(rdir: str | None, created_at: str | None) -> str | None:
+    """报告产出时刻（带本地时区的 ISO 字符串）。
+
+    优先取报告目录内最新文件的 mtime —— 那是 UZI 真正写出报告的时刻。
+    库里的 created_at 只是「最后一次同步」时间，点一下「仅同步」也会刷新，
+    拿它当调研时间会显示成「刚刚调研过」，是假的。
+
+    回退时注意：SQLite CURRENT_TIMESTAMP 是 UTC 且不带时区标记，
+    必须补 Z，否则前端会按本地时间解析，凭空差 8 小时。
+    """
+    if rdir and os.path.isdir(rdir):
+        try:
+            names = os.listdir(rdir)
+            stamps = [os.path.getmtime(os.path.join(rdir, n)) for n in names]
+            newest = max(stamps) if stamps else os.path.getmtime(rdir)
+            return datetime.fromtimestamp(newest).astimezone().isoformat()
+        except OSError:
+            pass
+    if created_at:
+        raw = str(created_at).strip().replace(" ", "T")
+        if raw.endswith("Z") or "+" in raw[10:]:
+            return raw
+        return f"{raw}Z"
+    return None
 
 
 def _fetch_row(symbol: str, market: str):
@@ -60,7 +87,8 @@ def list_uzi_reports():
         cur.execute(
             """
             SELECT symbol, market, tier, as_of_date, fundamental_score,
-                   one_liner, coverage_pct, html_path, score_integrity_json
+                   one_liner, coverage_pct, html_path, score_integrity_json,
+                   report_dir, created_at
             FROM uzi_reports
             ORDER BY as_of_date DESC
             """
@@ -88,6 +116,8 @@ def list_uzi_reports():
                 "coverage_pct": r[6],
                 "field_coverage_pct": r[6],
                 "html_available": bool(r[7] and os.path.exists(r[7])),
+                # 列表标签下方显示的「调研时间」；没报告目录的老数据回退同步时间
+                "report_time": _report_time(r[9], r[10]),
             }
         )
     return {"count": len(items), "items": items}

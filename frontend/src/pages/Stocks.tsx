@@ -11,7 +11,7 @@ import {
   loadPortfolioPageCoreData,
   loadPortfolioPageQuoteData,
 } from '@/lib/portfolio-page-data'
-import { SuggestionBadge, type SuggestionInfo, type KlineSummary } from '@panwatch/biz-ui/components/suggestion-badge'
+import { SuggestionBadge, formatShortInstant, type SuggestionInfo, type KlineSummary } from '@panwatch/biz-ui/components/suggestion-badge'
 import { KlineSummaryDialog } from '@panwatch/biz-ui/components/kline-summary-dialog'
 import { Button } from '@panwatch/base-ui/components/ui/button'
 import { Input } from '@panwatch/base-ui/components/ui/input'
@@ -54,8 +54,11 @@ function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
   const fmtDate = (d?: string) =>
     d && /^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d || ''
   const brief = (info.one_liner || '').split('\n')[0].replace(/🟢\s*/g, '').trim()
+  // 报告真正落盘的时刻（后端取报告目录 mtime，不是「最后一次同步」时间）
+  const reportTime = formatShortInstant(info.report_time)
   const tip = [
     `UZI 调研${info.tier ? ` · ${info.tier} 档` : ''}${info.as_of_date ? ` · ${fmtDate(info.as_of_date)}` : ''}`,
+    reportTime ? `报告产出 ${reportTime}` : '',
     score != null
       ? `实测口径 ${score.toFixed(1)} 分（${info.real_dims ?? '?'}/${info.total_dims ?? '?'} 维有真实数据，覆盖权重 ${Number(
           info.real_weight_pct ?? 0
@@ -76,10 +79,15 @@ function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
         e.preventDefault()
         onOpen()
       }}
-      className={`shrink-0 align-middle ml-2 mr-2 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold leading-none shadow-sm transition-all hover:shadow hover:brightness-105 ${toneCls}`}
+      className={`shrink-0 align-middle ml-2 mr-2 inline-flex flex-col items-start gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold leading-none shadow-sm transition-all hover:shadow hover:brightness-105 ${toneCls}`}
     >
-      <span className="opacity-75 tracking-wide">UZI</span>
-      {score != null && <span className="font-mono tabular-nums">{score.toFixed(1)}</span>}
+      <span className="inline-flex items-center gap-1.5">
+        <span className="opacity-75 tracking-wide">UZI</span>
+        {score != null && <span className="font-mono tabular-nums">{score.toFixed(1)}</span>}
+      </span>
+      {reportTime && (
+        <span className="text-[10px] font-normal leading-none opacity-70 tabular-nums">{reportTime}</span>
+      )}
     </button>
   )
 }

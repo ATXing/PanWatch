@@ -84,6 +84,19 @@ interface SuggestionBadgeProps {
   showTechnicalCompanion?: boolean // 是否展示技术指标对照徽章
 }
 
+/**
+ * 徽章下方的时间戳：固定输出「10/24 11:04」。
+ * 用本地时间 getter 逐段拼，不切 ISO 字符串、不写死 timeZone，
+ * 也不受 locale 里「2026年10月24日」这类格式差异影响（徽章空间只够这一种紧凑写法）。
+ */
+export function formatShortInstant(isoTime?: string | null): string {
+  if (!isoTime) return ''
+  const date = new Date(isoTime)
+  if (isNaN(date.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 // 格式化建议时间（自动转换为本地时区，只显示时:分）
 function formatSuggestionTime(isoTime?: string, locale = 'zh-CN'): string {
   if (!isoTime) return ''
@@ -103,8 +116,7 @@ function formatSuggestionTime(isoTime?: string, locale = 'zh-CN'): string {
 }
 
 // 格式化完整日期时间（本地时区）
-function formatSuggestionDateTime(isoTime?: string, locale = 'zh-CN'): string {
-  if (!isoTime) return ''
+function formatSuggestionDateTime(isoTime?: string, locale = 'zh-CN'): string {  if (!isoTime) return ''
   try {
     const date = new Date(isoTime)
     if (isNaN(date.getTime())) return ''
@@ -337,6 +349,8 @@ export function SuggestionBadge({
   // 仅展示技术指标（无建议）
   if (!suggestion && kline) {
     const tech = buildKlineSuggestion(kline as any, hasPosition, klineTr)
+    // 指标算出来的时刻：后端 kline_collector 写 computed_at（UTC 带时区）
+    const techTime = formatShortInstant(kline.computed_at)
     return (
       <>
         <div className="inline-flex flex-col items-start gap-0.5">
@@ -350,6 +364,9 @@ export function SuggestionBadge({
             }}
             title={tr('technicalTitle')}
           />
+          {techTime && (
+            <div className="text-[10px] leading-none text-muted-foreground/70">{techTime}</div>
+          )}
         </div>
 
         <KlineSummaryDialog
@@ -369,13 +386,15 @@ export function SuggestionBadge({
   const isAI = !!suggestion.agent_name && !isTechnical
 
   // 持仓页模式：小徽章 + 点击弹窗
-  const timeStr = formatSuggestionTime(suggestion.created_at, locale)
+  // 时间统一用「10/24 11:04」：徽章下只有一行位置，不带日期就分不清「今天刚跑」和「上周的」
+  const timeShort = formatShortInstant(suggestion.created_at)
+  const techTimeShort = formatShortInstant(kline?.computed_at)
   const sourceInfo = ''
 
   return (
     <>
-      <div className="inline-flex flex-col items-start gap-0.5">
-        <div className="inline-flex items-center gap-1">
+      <div className="inline-flex items-start gap-1">
+        <div className="inline-flex flex-col items-start gap-0.5">
           <AiSuggestionBadge
             {...suggestion}
             action={suggestion.action}
@@ -390,10 +409,19 @@ export function SuggestionBadge({
             }}
             title={sourceInfo ? `${sourceInfo} - ${tr('detailTitle')}` : tr('detailTitle')}
           />
-          {showTechnicalCompanion && !isTechnical && (
-            (() => {
-              const tech = kline ? buildKlineSuggestion(kline as any, hasPosition, klineTr) : null
-              return (
+          {/* 来源和时间（显示在徽章正下方，与右侧技术徽章的时间各自对齐）*/}
+          {timeShort && (
+            <div className="text-[10px] leading-none text-muted-foreground/70">
+              {isAI ? `${tr('source')}${localizedAgent || 'AI'} · ${timeShort}` : timeShort}
+              {suggestion.is_expired && <span className="ml-1 text-amber-600">{tr('expired')}</span>}
+            </div>
+          )}
+        </div>
+        {showTechnicalCompanion && !isTechnical && (
+          (() => {
+            const tech = kline ? buildKlineSuggestion(kline as any, hasPosition, klineTr) : null
+            return (
+              <div className="inline-flex flex-col items-start gap-0.5">
                 <TechnicalBadge
                   label={`${tr('technicalShort')} · ${technicalLabel(tech)}`}
                   tone={tech ? technicalToneFromSuggestionAction(tech.action, tech.action_label) : 'neutral'}
@@ -401,16 +429,12 @@ export function SuggestionBadge({
                   onClick={(e) => { e.stopPropagation(); setKlineDialogOpen(true) }}
                   title={tr('technicalTitle')}
                 />
-              )
-            })()
-          )}
-        </div>
-        {/* 来源和时间（显示在徽章下方，仅 AI 建议以增强区分）*/}
-        {isAI && (
-          <div className="mt-1 text-[10px] text-muted-foreground/70">
-            {tr('source')}{localizedAgent || 'AI'}{timeStr && ` · ${timeStr}`}
-            {suggestion.is_expired && <span className="ml-1 text-amber-600">{tr('expired')}</span>}
-          </div>
+                {techTimeShort && (
+                  <div className="text-[10px] leading-none text-muted-foreground/70">{techTimeShort}</div>
+                )}
+              </div>
+            )
+          })()
         )}
       </div>
 
