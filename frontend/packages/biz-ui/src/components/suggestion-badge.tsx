@@ -166,6 +166,11 @@ export function SuggestionBadge({
     : english
       ? suggestion?.agent_name || tr('unknown')
       : suggestion?.agent_label || suggestion?.agent_name || tr('unknown')
+  // 徽章下方只有 10px 一行位置：来源用两字简称（盘前/盘中/盘后），时间只留「MM/DD HH:mm」，
+  // 过期时追加「过期」两字，不过期不写（不再用「来源：…（已过期）」这种占宽最大的写法）
+  const shortAgent = suggestion?.agent_name && knownAgents.has(suggestion.agent_name)
+    ? tr(`agentsShort.${suggestion.agent_name}`)
+    : localizedAgent
   const localizedAction = (action?: string, label?: string) => (t as unknown as (key: string) => string)(suggestionPresentation({ action, action_label: label }).labelKey)
   const technicalLabel = (tech: ReturnType<typeof buildKlineSuggestion> | null) => tech
     ? localizedAction(tech.action, tech.action_label)
@@ -389,6 +394,10 @@ export function SuggestionBadge({
   // 时间统一用「10/24 11:04」：徽章下只有一行位置，不带日期就分不清「今天刚跑」和「上周的」
   const timeShort = formatShortInstant(suggestion.created_at)
   const techTimeShort = formatShortInstant(kline?.computed_at)
+  // 一行压到最短：「盘前·10/24 11:04」，过期时行尾再加「过期」
+  const badgeStamp = isAI
+    ? [shortAgent, timeShort].filter(Boolean).join('·')
+    : timeShort
   const sourceInfo = ''
 
   return (
@@ -410,10 +419,10 @@ export function SuggestionBadge({
             title={sourceInfo ? `${sourceInfo} - ${tr('detailTitle')}` : tr('detailTitle')}
           />
           {/* 来源和时间（显示在徽章正下方，与右侧技术徽章的时间各自对齐）*/}
-          {timeShort && (
-            <div className="text-[10px] leading-none text-muted-foreground/70">
-              {isAI ? `${tr('source')}${localizedAgent || 'AI'} · ${timeShort}` : timeShort}
-              {suggestion.is_expired && <span className="ml-1 text-amber-600">{tr('expired')}</span>}
+          {badgeStamp && (
+            <div className="text-[10px] leading-none whitespace-nowrap text-muted-foreground/70">
+              {badgeStamp}
+              {suggestion.is_expired && <span className="ml-1 text-amber-600">{tr('expiredShort')}</span>}
             </div>
           )}
         </div>
