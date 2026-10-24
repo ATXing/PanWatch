@@ -71,24 +71,25 @@ function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
     .filter(Boolean)
     .join('\n')
   return (
-    <button
-      type="button"
-      title={tip}
-      onClick={(e) => {
-        e.stopPropagation()
-        e.preventDefault()
-        onOpen()
-      }}
-      className={`shrink-0 align-middle ml-2 mr-2 inline-flex flex-col items-start gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold leading-none shadow-sm transition-all hover:shadow hover:brightness-105 ${toneCls}`}
-    >
-      <span className="inline-flex items-center gap-1.5">
+    // 时间放在框外下方，跟 AI 建议/指标徽章的「徽章 + 下方时间」排版保持一致
+    <span className="shrink-0 align-middle ml-2 mr-2 inline-flex flex-col items-start gap-0.5">
+      <button
+        type="button"
+        title={tip}
+        onClick={(e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          onOpen()
+        }}
+        className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold leading-none shadow-sm transition-all hover:shadow hover:brightness-105 ${toneCls}`}
+      >
         <span className="opacity-75 tracking-wide">UZI</span>
         {score != null && <span className="font-mono tabular-nums">{score.toFixed(1)}</span>}
-      </span>
+      </button>
       {reportTime && (
-        <span className="text-[10px] font-normal leading-none opacity-70 tabular-nums">{reportTime}</span>
+        <span className="text-[10px] font-normal text-muted-foreground/70 tabular-nums">{reportTime}</span>
       )}
-    </button>
+    </span>
   )
 }
 
