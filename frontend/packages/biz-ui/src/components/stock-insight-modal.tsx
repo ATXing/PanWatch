@@ -2367,7 +2367,7 @@ function UziReportSection({
           {report?.fundamental_score != null && (
             <span
               className="text-[10px] text-muted-foreground/75"
-              title="UZI 的 19 维基本面加权分：含 7 个固定占位分（宏观/行业/原材料/期货/政策/护城河/杀猪盘）与未采集维度的默认分"
+              title="UZI 的 19 维基本面加权分：没取到数据的维度（宏观/行业/原材料/期货/政策/护城河/杀猪盘等）按中性 5 分占位，不构成判断"
             >
               （UZI 基本面 {report.fundamental_score}
               {report.uzi_overall_score != null && report.panel_consensus != null
@@ -2633,7 +2633,7 @@ function UziReportSection({
           <div className="mt-1 text-[12px] text-foreground/85">
             {trapStatus?.status === 'none' ? (
               <span className="text-amber-700 dark:text-amber-400">
-                本次没有扫描公开帖，<b>不构成「安全」结论</b>；卡片里的 9 分是 UZI 的固定默认值。
+                本次没有扫描公开帖，<b>不构成「安全」结论</b>；卡片里的 5 分是中性占位，不代表已排查。
               </span>
             ) : (
               trap.label || '—'
@@ -2653,8 +2653,8 @@ function UziReportSection({
         维度体检共 {dimEntries.length} 项，按 UZI 官方分类分组。每项 0–10 分：
         7–10 健康 · 4–6 中性 · 0–3 偏弱；顶部「实测口径分数」是 0–100，只把真有采集数据的维度按权重加权。
         <br />
-        显示「未评估」的项没有拿到数据，不给分数、不参与评分；标「占位分 / 兜底推断」的项分数不是由真实数据算出
-        （UZI 对部分维度直接给固定分，如行业景气恒 7、杀猪盘恒 9），同样不计入结论。
+        显示「未评估」的项没有拿到数据，不给分数、不参与评分；标「占位 / 兜底推断」的项分数不是由真实数据算出
+        （没取到数据的维度 UZI 按中性 5 分占位，不再给偏高固定分），同样不计入结论。
       </div>
 
       {integ && missing.length > 0 && (
@@ -2672,7 +2672,7 @@ function UziReportSection({
             </button>
           </div>
           <div className="text-[10px] text-muted-foreground">
-            固定占位分 {counts.stub || 0} 维 · 兜底推断 {counts.weak || 0} 维 · 未采集/不适用 {counts.none || 0} 维
+            无实测数据（中性占位）{counts.stub || 0} 维 · 兜底推断 {counts.weak || 0} 维 · 未采集/不适用 {counts.none || 0} 维
           </div>
           {showMissing && (
             <div className="space-y-1 pt-1 border-t border-amber-500/20">
@@ -2765,7 +2765,7 @@ const DIM_STATUS_BADGE: Record<string, string> = {
 
 /**
  * 分类汇总结论。只采信 status==='ok'（真实采集并据此打分）的维度；
- * UZI 的占位分（如 7_industry 恒 7、18_trap 恒 9）和未采集到的默认分一律不进结论，
+ * 未取到数据的维度（UZI 按中性 5 分占位）和兜底推断分一律不进结论，
  * 否则会给出不可核实的"健康感"。
  */
 function buildGroupSummary(
@@ -2835,7 +2835,7 @@ function buildGroupSummary(
 
     case '宏观与政策':
       if (okCount === 0) {
-        return res('宏观与政策在 UZI 里都是固定占位分（未接实测数据），对本股不构成任何判断', 'unknown')
+        return res('宏观与政策这几项没取到实测数据，按中性占位，对本股不构成任何判断', 'unknown')
       }
       return res('部分项有实测，但 UZI 的宏观/政策多为推断值，参考价值有限', 'warn')
 
@@ -2843,7 +2843,7 @@ function buildGroupSummary(
       const trap = ds['18_trap']
       const sent = sc('17_sentiment')
       if (trap?.status === 'none') {
-        return res('杀猪盘本次没扫描，9 分是默认值——不能据此认为安全', 'bad')
+        return res('杀猪盘本次没扫到证据，按中性 5 分占位——不能据此认为安全', 'bad')
       }
       const sentW = sent == null ? '' : sent >= 8 ? '，舆情较热需防过热' : '，舆情冷清'
       if (trap?.status === 'stub' || trap?.status === 'ok') {

@@ -111,27 +111,36 @@ def _read_one_liner(path: str) -> str:
 
 
 # ── 维度数据性质判定 ───────────────────────────────────────────────────────
-# 背景:UZI 打分函数 lib/pipeline/score_fns.py 里,**部分维度根本不读采集结果,
-# 直接返回固定分**(注释自称 stub)。例如 7_industry 恒 7 分、18_trap 恒 9 分
-# "🟢 未发现推广痕迹"。而 lite 档压根不采集 4_peers/5_chain/6_research/
-# 12_capital_flow/14_moat/17_sentiment/18_trap/19_contests,打分层照样给默认分。
-# 若面板把这类分数当结论展示,等于给出不可核实的"安全感"。
+# 背景:UZI 打分函数 lib/pipeline/score_fns.py 里,部分定性维度曾经**根本不读采集结果,
+# 直接 return 常量分**(7_industry 恒 7、18_trap 恒 9、13_policy/14_moat/17_sentiment
+# 恒 6 等)。2026-10-24 已全部改成数据驱动:拿到具体字段才加减分,拿不到就给中性 5 分
+# 并在 label 里明写「未取得」。
 #
 # 因此同步时按 raw_data.json 的真实采集情况给每维打标:
 #   ok    = 有真实采集,分数由数据算出
-#   stub  = 固定占位分(score_fns 硬编码,不随标的改变)
+#   stub  = 定性维但没实测数据 → 中性 5 分占位(label 里写「未取得/未评估/未取证」)
 #   weak  = 有采集但是兜底/推断值,或采到了但无结果
 #   none  = 未采集 / 该市场不适用
-_STUB_DIMS = {
-    # score_fns.py 中直接 return 固定分的维度(行号见注释)
-    "3_macro": "score_fns.py:113 · 恒 6",
-    "7_industry": "score_fns.py:167 · 恒 7",
-    "8_materials": "score_fns.py:170 · 恒 6",
-    "9_futures": "score_fns.py:173 · 恒 5",
-    "13_policy": "score_fns.py:225 · 恒 6",
-    "14_moat": "score_fns.py:228 · 恒 6",
-    "18_trap": "score_fns.py:261 · 恒 9(未扫描也给「安全」)",
+#
+# 定性维清单保留,用途从「跳过判定」变成「必须确认 label 是否说了未取得」。
+_QUAL_DIMS = {
+    "3_macro",
+    "7_industry",
+    "8_materials",
+    "9_futures",
+    "13_policy",
+    "14_moat",
+    "17_sentiment",
+    "18_trap",
 }
+# label 里出现这些词 = 这维其实是空壳,分数只是中性占位
+_QUAL_EMPTY_MARKERS = (
+    "未取得",
+    "未评估",
+    "未取证",
+    "无政策条目",
+    "期货关联系未取得",
+)
 _NO_DATA_LABELS = (
     "无同行数据",
     "数据不完整",
@@ -247,18 +256,31 @@ def _dim_status(dims: dict, raw_dims: dict) -> dict[str, dict]:
         if weight == 0:
             out[key] = {"status": "none", "note": "该市场不适用"}
         elif key == "18_trap":
-            # 特例:打分层恒给 9 分「未发现推广痕迹」,但真实扫描结论在 raw 里,
-            # 两者可能冲突(命中风险信号时 raw 会降分,dimensions 仍是 9)。
+            # 打分层判据 = 有没有真的扫到公开帖（snippets 非空）；命中数只作说明。
             data = (raw or {}).get("data") or {}
             level = data.get("trap_level")
             hit = data.get("signals_hit")
-            if has_raw and level:
-                out[key] = {"status": "stub", "note": f"{hit or '—'} 命中 · {level}（分数仍为固定 9）"}
+            ev = data.get("evidence_count")
+            snips = data.get("snippets") or {}
+            if has_raw and level and (snips or data.get("signals_hit_count")):
+                out[key] = {"status": "ok",
+                            "note": f"{hit or '—'} 命中 · {level} · 已扫 {len(snips)} 组公开帖"}
             else:
-                out[key] = {"status": "none", "note": "未扫描 · 9 分是默认值，不代表已排查"}
-        elif key in _STUB_DIMS:
-            # 打分层写死固定分,即便 raw 里有兜底文本也不算实测
-            out[key] = {"status": "stub", "note": "UZI 此项为固定占位分，不随标的改变"}
+                out[key] = {
+                    "status": "none",
+                    "note": "没扫到公开帖，UZI 按中性 5 分占位，不构成「安全」结论",
+                }
+        elif key in _QUAL_DIMS:
+            # 定性维:label 自己说「未取得」就当空壳;有内容则按 fallback 判 weak/ok
+            if any(m in label for m in _QUAL_EMPTY_MARKERS):
+                out[key] = {
+                    "status": "none",
+                    "note": "该维无实测数据，UZI 按中性 5 分占位，不计入结论",
+                }
+            elif fallback:
+                out[key] = {"status": "weak", "note": "兜底/推断值，仅作定性参考"}
+            else:
+                out[key] = {"status": "ok"}
         elif not has_raw:
             out[key] = {
                 "status": "none",
