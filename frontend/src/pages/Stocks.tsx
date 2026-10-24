@@ -1,5 +1,5 @@
 import { useConfirm } from '@panwatch/base-ui/components/ui/confirm-dialog'
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Plus, Trash2, Pencil, Search, X, TrendingUp, Bot, Play, RefreshCw, Wallet, PiggyBank, ArrowUpRight, ArrowDownRight, Building2, ChevronDown, ChevronRight, Cpu, Bell, Clock, Newspaper, ExternalLink, BarChart3, Brain } from 'lucide-react'
 import { fetchAPI, stocksApi, insightApi, type AIService, type NotifyChannel, type UziListItem } from '@panwatch/api'
@@ -118,6 +118,20 @@ function UziEmptyTag({ onOpen }: { onOpen: () => void }) {
       <span aria-hidden className="invisible text-[10px] leading-none">
         00/00 00:00
       </span>
+    </span>
+  )
+}
+
+/**
+ * 名字这一格刻意跟「徽章栈」同构：上面一行 26px 高（与 UZI / AI / 指标徽章框等高）+ 下面一条隐形时间行。
+ * 因为各栈总高一致，父容器无论是「行内流 + align-bottom」（桌面表格）还是「flex items-center」（卡片），
+ * 结果都是**框**对**框**：股票名与徽章框垂直居中对齐，框下的时间戳在框外、不参与这个居中。
+ */
+function NameRow({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return (
+    <span className={`align-bottom inline-flex flex-col items-start gap-0.5 ${className}`}>
+      <span className="inline-flex min-h-[26px] items-center gap-1.5">{children}</span>
+      <span aria-hidden className="invisible text-[10px] leading-none">00/00 00:00</span>
     </span>
   )
 }
@@ -2037,17 +2051,20 @@ export default function StocksPage() {
                                   {/* 宽屏不换行：UZI / AI / 指标三个徽章都留在名字这一行，框下时间才在同一底线；
                                       窄屏（<1480px）保留折行，12 列本来就不够放 */}
                                   <td className="px-4 py-2.5 min-[1480px]:whitespace-nowrap">
-                                    <span className={`text-[9px] px-1 py-0.5 rounded mr-1.5 ${badge.style}`}>{badge.label}</span>
-                                    <span className="font-mono text-[12px] font-semibold text-foreground">
-                                      {pos.symbol}
-                                    </span>
-                                    <button
-                                      className="ml-1.5 text-[12px] text-muted-foreground hover:text-primary"
-                                      onClick={() => openStockDetail(pos.symbol, pos.market, pos.name, true)}
-                                    >
-                                      {pos.name}
-                                      {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
-                                    </button>
+                                    {/* 名字与徽章「框对框」居中：NameRow 的 26px 格与徽章框等高，栈底对齐后自然居中 */}
+                                    <NameRow>
+                                      <span className={`text-[9px] px-1 py-0.5 rounded ${badge.style}`}>{badge.label}</span>
+                                      <span className="font-mono text-[12px] font-semibold text-foreground">
+                                        {pos.symbol}
+                                      </span>
+                                      <button
+                                        className="text-[12px] text-muted-foreground hover:text-primary"
+                                        onClick={() => openStockDetail(pos.symbol, pos.market, pos.name, true)}
+                                      >
+                                        {pos.name}
+                                        {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
+                                      </button>
+                                    </NameRow>
                                     {(() => {
                                       const uzi = uziMap[`${pos.symbol}|${pos.market}`]
                                       return uzi ? (
@@ -2224,17 +2241,19 @@ export default function StocksPage() {
                               {/* Row 1: Stock info + Current price */}
                               <div className="flex items-center justify-between gap-2 mb-2">
                                 <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className={`shrink-0 text-[9px] px-1 py-0.5 rounded ${badge.style}`}>{badge.label}</span>
-                                  <span className="shrink-0 font-mono text-[12px] font-semibold text-foreground">
-                                    {pos.symbol}
-                                  </span>
-                                  <button
-                                    className="text-[12px] text-muted-foreground hover:text-primary truncate"
-                                    onClick={() => openStockDetail(pos.symbol, pos.market, pos.name, true)}
-                                  >
-                                    {pos.name}
-                                    {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
-                                  </button>
+                                  <NameRow className="min-w-0">
+                                    <span className={`shrink-0 text-[9px] px-1 py-0.5 rounded ${badge.style}`}>{badge.label}</span>
+                                    <span className="shrink-0 font-mono text-[12px] font-semibold text-foreground">
+                                      {pos.symbol}
+                                    </span>
+                                    <button
+                                      className="min-w-0 text-[12px] text-muted-foreground hover:text-primary truncate"
+                                      onClick={() => openStockDetail(pos.symbol, pos.market, pos.name, true)}
+                                    >
+                                      {pos.name}
+                                      {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
+                                    </button>
+                                  </NameRow>
                                   {(() => {
                                     const uzi = uziMap[`${pos.symbol}|${pos.market}`]
                                     return uzi ? (
@@ -2244,8 +2263,11 @@ export default function StocksPage() {
                                     )
                                   })()}
                                   {pos.trading_style && (
-                                    <span className={`shrink-0 text-[9px] px-1 py-0.5 rounded ${pos.trading_style === 'short' ? 'bg-rose-500/10 text-rose-600' : pos.trading_style === 'long' ? 'bg-blue-500/10 text-blue-600' : 'bg-amber-500/10 text-amber-600'}`}>
-                                      {pos.trading_style === 'short' ? stockT('stocksPage.messages.shortStyleLabel') : pos.trading_style === 'long' ? stockT('stocksPage.messages.longStyleLabel') : stockT('stocksPage.messages.swingStyleLabel')}
+                                    // self-start + 26px 格：与 NameRow / UZI 徽章框同一水平（框对框居中，不跟整栈一起被 items-center 拉低 6px）
+                                    <span className="self-start inline-flex h-[26px] shrink-0 items-center">
+                                      <span className={`text-[9px] px-1 py-0.5 rounded ${pos.trading_style === 'short' ? 'bg-rose-500/10 text-rose-600' : pos.trading_style === 'long' ? 'bg-blue-500/10 text-blue-600' : 'bg-amber-500/10 text-amber-600'}`}>
+                                        {pos.trading_style === 'short' ? stockT('stocksPage.messages.shortStyleLabel') : pos.trading_style === 'long' ? stockT('stocksPage.messages.longStyleLabel') : stockT('stocksPage.messages.swingStyleLabel')}
+                                      </span>
                                     </span>
                                   )}
                                 </div>
@@ -2469,22 +2491,24 @@ export default function StocksPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className={`text-[9px] px-1 py-0.5 rounded ${marketBadge(stock.market).style}`}>
-                            {marketBadge(stock.market).label}
-                          </span>
-                          <button
-                            className="font-mono text-[12px] font-semibold text-foreground hover:text-primary"
-                            onClick={(e) => { e.stopPropagation(); if (tour?.active && tour.step === 'stock') { void tour.selectStock(stock.id); return }; openStockDetail(stock.symbol, stock.market, stock.name, false) }}
-                          >
-                            {stock.symbol}
-                          </button>
-                          <button
-                            className="text-[12px] text-muted-foreground truncate hover:text-primary"
-                            onClick={(e) => { e.stopPropagation(); if (tour?.active && tour.step === 'stock') { void tour.selectStock(stock.id); return }; openStockDetail(stock.symbol, stock.market, stock.name, false) }}
-                          >
-                            {stock.name}
-                            {stock.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
-                          </button>
+                          <NameRow className="min-w-0">
+                            <span className={`shrink-0 text-[9px] px-1 py-0.5 rounded ${marketBadge(stock.market).style}`}>
+                              {marketBadge(stock.market).label}
+                            </span>
+                            <button
+                              className="shrink-0 font-mono text-[12px] font-semibold text-foreground hover:text-primary"
+                              onClick={(e) => { e.stopPropagation(); if (tour?.active && tour.step === 'stock') { void tour.selectStock(stock.id); return }; openStockDetail(stock.symbol, stock.market, stock.name, false) }}
+                            >
+                              {stock.symbol}
+                            </button>
+                            <button
+                              className="min-w-0 text-[12px] text-muted-foreground truncate hover:text-primary"
+                              onClick={(e) => { e.stopPropagation(); if (tour?.active && tour.step === 'stock') { void tour.selectStock(stock.id); return }; openStockDetail(stock.symbol, stock.market, stock.name, false) }}
+                            >
+                              {stock.name}
+                              {stock.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
+                            </button>
+                          </NameRow>
                           {(() => {
                             const uzi = uziMap[`${stock.symbol}|${stock.market}`]
                             return uzi ? (
