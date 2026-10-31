@@ -20,6 +20,19 @@ export interface KlineScoreSuggestion {
 
 export type KlineTranslate = (key: string, options?: Record<string, unknown>) => string
 
+/**
+ * 技术评分的实战可达上限（对称，故只存一个数）。
+ *
+ * 八项加减累加的**纯数学**范围是 ±10，但 ±10 要求「价格突破布林上轨」与「贴近支撑位
+ * （收盘 ≤ 支撑 ×1.02）」同时成立——价格既在带上轨之上又在支撑位附近，行情里不可能出现；
+ * 负向同理（跌破下轨 + 贴近压力位）。剔除这类自相矛盾的组合后，可达区间是 −9 ~ +9，
+ * 且 +9 / −9 各只有 2 种状态组合（8 项里 7 项同时成立）。
+ *
+ * UI 的强度条与上限刻度都用这个值，**不写死 10**，否则条永远填不满、看着像系统坏了。
+ * 改动打分规则（增删维度或调整权重）后必须回头复核此值。
+ */
+export const KLINE_SCORE_LIMIT = 9
+
 export function buildKlineSuggestion(s: KlineSummaryData, holding: boolean | undefined, tr: KlineTranslate): KlineScoreSuggestion {
   let score = 0
   const items: KlineEvidenceItem[] = []

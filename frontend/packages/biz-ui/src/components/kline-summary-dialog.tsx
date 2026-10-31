@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { fetchAPI } from '@panwatch/api'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@panwatch/base-ui/components/ui/dialog'
 import { Button } from '@panwatch/base-ui/components/ui/button'
-import { buildKlineSuggestion } from '@/lib/kline-scorer'
+import { buildKlineSuggestion, KLINE_SCORE_LIMIT } from '@/lib/kline-scorer'
 import { TechnicalBadge, technicalToneFromSuggestionAction } from '@panwatch/biz-ui/components/technical-badge'
 import { KlineIndicators, localizeTechnicalStatus } from '@panwatch/biz-ui/components/kline-indicators'
 
@@ -156,6 +156,10 @@ export function KlineSummaryDialog({
     () => effectiveSummary ? buildLocalizedSuggestion(effectiveSummary, hasPosition, tr) : null,
     [effectiveSummary, hasPosition, i18n.resolvedLanguage, i18n.language],
   )
+  // 强度条的填充比例：|score| / 上限，半幅即满格（clamp 防未来规则变动后溢出）
+  const scoreFillPct = suggestion
+    ? (Math.min(Math.abs(suggestion.score), KLINE_SCORE_LIMIT) / KLINE_SCORE_LIMIT) * 50
+    : 0
 
   const handleAskAI = useCallback(() => {
     if (!effectiveSummary) return
@@ -219,6 +223,24 @@ export function KlineSummaryDialog({
                   <span className="text-[10px] text-muted-foreground">
                     {hasPosition ? tr('held') : tr('notHeld')} · {tr('score', { value: suggestion.score })}
                   </span>
+                </div>
+                {/* 强度条：0 在正中间，正分向右、负分向左填充；刻度标的是实战可达上限 ±9
+                    （不是数学上的 ±10，±10 需要自相矛盾的条件同时成立）。没有刻度时
+                    「评分 9」看不出是否封顶，补上刻度就一眼知道离满还有多远。 */}
+                <div className="mt-2">
+                  <div className="relative h-2 overflow-hidden rounded-full bg-border/50">
+                    <div
+                      className={`absolute inset-y-0 ${suggestion.score >= 0 ? 'bg-market-up' : 'bg-market-down'}`}
+                      style={suggestion.score >= 0 ? { left: '50%', width: `${scoreFillPct}%` } : { right: '50%', width: `${scoreFillPct}%` }}
+                    />
+                    <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-foreground/20" />
+                  </div>
+                  <div className="mt-0.5 flex justify-between font-mono text-[9px] text-muted-foreground/60">
+                    <span>{`-${KLINE_SCORE_LIMIT}`}</span>
+                    <span>0</span>
+                    <span>{`+${KLINE_SCORE_LIMIT}`}</span>
+                  </div>
+                  <div className="mt-0.5 text-[9px] text-muted-foreground/60">{tr('scoreScaleTip')}</div>
                 </div>
                 {suggestion.signal && <div className="mt-2 text-[12px] font-medium text-foreground">{suggestion.signal}</div>}
                 {suggestion.items.length > 0 && (

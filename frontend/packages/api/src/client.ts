@@ -204,6 +204,16 @@ export async function fetchAPI<T>(path: string, options?: ApiRequestOptions): Pr
     if (error?.name === 'AbortError') {
       throw new Error(interfaceText('请求超时，请稍后重试', 'The request timed out. Try again later.'))
     }
+    // fetch 的网络层失败（后端没起、端口不通、被代理拦）在浏览器里只会抛一句
+    // "Failed to fetch"，对用户毫无信息量且看不出是本地服务挂了。这里统一翻成人话。
+    if (error instanceof TypeError) {
+      throw new Error(
+        interfaceText(
+          '连不上本地服务（可能是后端未启动或已退出），请确认 8123 端口的 PanWatch 正在运行',
+          'Cannot reach the local service. Check that PanWatch is running on port 8123.',
+        ),
+      )
+    }
     throw error
   } finally {
     if (timeoutId !== null) {

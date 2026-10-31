@@ -84,3 +84,20 @@ export function suggestionPresentation(suggestion: SuggestionStateInput) {
     colorClass: review && !separated ? 'bg-orange-500 text-white' : suggestionActionColors[attention && action === 'watch' ? 'alert' : action],
   }
 }
+
+/**
+ * 建议池里 AI 决策的置信度百分数。
+ *
+ * 真值只存在 `meta.plan.confidence`，量纲是 0~1（AI 原文「置信度 45%」即 0.45）。
+ * 不要改用顶层的 `confidence`：那是 deep-analysis / stock-insight 弹窗用的 0~10 分制
+ * （默认 5.0、展示为 "5.0"），两套体系量纲不同，混用会显示成 4.5 或 500。
+ *
+ * 取不到就返回 null —— 宁可不显示，也不能写死一个「看起来安全」的默认值。
+ */
+export function extractConfidencePercent(meta?: Record<string, any> | null): number | null {
+  const raw = meta?.plan?.confidence
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null
+  const pct = Math.round(raw * 100)
+  if (pct < 0 || pct > 100) return null
+  return pct
+}
