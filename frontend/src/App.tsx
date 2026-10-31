@@ -92,7 +92,7 @@ function App() {
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [upgradeInfo, setUpgradeInfo] = useState<{ latest: string; url: string } | null>(null)
   const checkedUpdateRef = useRef(false)
-  const repoUrl = 'https://github.com/TNT-Likely/PanWatch'
+  const repoUrl = 'https://github.com/ATXing/PanWatch'
   const navItems = NAV_ITEMS.map(item => ({
     to: item.to,
     icon: item.icon,
