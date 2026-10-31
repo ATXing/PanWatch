@@ -2,7 +2,7 @@ import { useConfirm } from '@panwatch/base-ui/components/ui/confirm-dialog'
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Plus, Trash2, Pencil, Search, X, TrendingUp, Bot, Play, RefreshCw, Wallet, PiggyBank, ArrowUpRight, ArrowDownRight, Building2, ChevronDown, ChevronRight, Cpu, Bell, Clock, Newspaper, ExternalLink, BarChart3, Brain } from 'lucide-react'
-import { fetchAPI, stocksApi, insightApi, type AIService, type NotifyChannel, type UziListItem } from '@panwatch/api'
+import { fetchAPI, stocksApi, insightApi, tradingAgentsApi, type AIService, type NotifyChannel, type UziListItem } from '@panwatch/api'
 import { klinesApi } from '@panwatch/api/klines'
 import { useLocalStorage, formatDateTime } from '@/lib/utils'
 import {
@@ -12,6 +12,7 @@ import {
   loadPortfolioPageQuoteData,
 } from '@/lib/portfolio-page-data'
 import { SuggestionBadge, formatShortInstant, type SuggestionInfo, type KlineSummary } from '@panwatch/biz-ui/components/suggestion-badge'
+import { buildTaInfo, taConfidenceText, taToneCls, type TaInfo } from '@/lib/ta-badge'
 import { KlineSummaryDialog } from '@panwatch/biz-ui/components/kline-summary-dialog'
 import { Button } from '@panwatch/base-ui/components/ui/button'
 import { Input } from '@panwatch/base-ui/components/ui/input'
@@ -25,12 +26,14 @@ import { useToast } from '@panwatch/base-ui/components/ui/toast'
 import StockInsightModal from '@panwatch/biz-ui/components/stock-insight-modal'
 import { DeepAnalysisModal } from '@panwatch/biz-ui/components/deep-analysis-modal'
 import StockPriceAlertPanel from '@panwatch/biz-ui/components/stock-price-alert-panel'
+import { StockNoteButton } from '@panwatch/biz-ui/components/stock-note'
 import { useTranslation } from 'react-i18next'
 import { localizeAgentDescription, localizeAgentName } from '@/i18n/agent-labels'
 import { getCurrentLocale } from '@/i18n'
 import { browserTimezone } from '@panwatch/base-ui'
 import { applyMarketStatuses, mergePortfolioQuotes, toQuoteMap, type Position, type PortfolioSummary, type QuoteResponse, type DisplayQuote } from '@/lib/portfolio-quotes'
 import { MarketCalendarStatus, type MarketStatus } from '@/components/MarketCalendarStatus'
+import { ThsLink } from '@/components/ThsLink'
 import { marketSignTextClass } from '@/lib/market-colors'
 import { parseAssistantPortfolioTarget } from '@/lib/assistant-navigation'
 import { useGuidedTour } from '@/components/onboarding/GuidedTour'
@@ -123,6 +126,80 @@ function UziEmptyTag({ onOpen }: { onOpen: () => void }) {
 }
 
 /**
+ * 股票名后的「TA 评级」标签：做过 TradingAgents 深度分析的股票才有。
+ * 点开复用 🧠 按钮的 DeepAnalysisModal；与 UZI 徽章同构（26px 框 + 框下时间）。
+ * TA 是买卖决策，允许用涨跌色语义（沿用项目 market-up/down），与 UZI 的中性紫区分开。
+ */
+function TaTag({ info, onOpen }: { info: TaInfo; onOpen: () => void }) {
+  const review = info.review_required === true || info.rating_raw === 'review'
+  const label = review ? '待复核' : info.action_label || '—'
+  const conf = typeof info.confidence === 'number' ? info.confidence.toFixed(1) : null
+  // 徽章内写「· 置信度7.2」（与 AI 徽章的「·置信度72」同一套读法），裸数字看不出含义
+  const confText = taConfidenceText(info.confidence)
+  const when = formatShortInstant(info.generated_at || info.analysis_date)
+  const dateText = info.analysis_date || ''
+  const tip = [
+    `TradingAgents 深度分析${dateText ? ` · ${dateText}` : ''}`,
+    when ? `生成 ${when}` : '',
+    `评级 ${info.rating_raw || info.action}${review ? '（待人工复核）' : ''}`,
+    conf != null ? `置信度 ${conf} / 10` : '',
+    info.one_liner,
+    '点击进入深度分析（可重新分析 / 查看完整报告）',
+  ]
+    .filter(Boolean)
+    .join('\n')
+  return (
+    <span className="shrink-0 align-bottom ml-2 mr-2 inline-flex flex-col items-start gap-0.5">
+      <button
+        type="button"
+        title={tip}
+        onClick={(e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          onOpen()
+        }}
+        className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[12px] font-semibold leading-none shadow-sm transition-all hover:shadow hover:brightness-105 ${taToneCls(info.action, review)}`}
+      >
+        <span className="opacity-75 tracking-wide">TA</span>
+        <span>{label}</span>
+        {confText && <span className="font-normal tabular-nums opacity-80 whitespace-nowrap">{confText}</span>}
+      </button>
+      {when && (
+        <span className="text-[10px] font-normal leading-none text-muted-foreground/70 tabular-nums">{when}</span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * 没做过 TradingAgents 深度分析的股票：给一个虚线入口，点开直接进弹窗发起分析。
+ * 样式刻意比 TaTag 低调（虚线 + 无底色），避免与已有结论抢视觉。
+ */
+function TaEmptyTag({ onOpen }: { onOpen: () => void }) {
+  return (
+    <span className="shrink-0 align-bottom ml-2 mr-2 inline-flex flex-col items-start gap-0.5">
+      <button
+        type="button"
+        title={'这只股票还没做过 TradingAgents 深度分析\n点击进入深度分析面板，可一键发起（多 Agent 投研，非买卖建议）'}
+        onClick={(e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          onOpen()
+        }}
+        className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-dashed border-border bg-transparent px-2 py-1.5 text-[12px] font-medium leading-none text-muted-foreground/80 transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary"
+      >
+        <span className="opacity-70 tracking-wide">TA</span>
+        <span>分析</span>
+      </button>
+      {/* 占位行：与 TaTag 时间行等高，同排徽章的框底才能落在同一水平线 */}
+      <span aria-hidden className="invisible text-[10px] leading-none">
+        00/00 00:00
+      </span>
+    </span>
+  )
+}
+
+/**
  * 名字这一格刻意跟「徽章栈」同构：上面一行 26px 高（与 UZI / AI / 指标徽章框等高）+ 下面一条隐形时间行。
  * 因为各栈总高一致，父容器无论是「行内流 + align-bottom」（桌面表格）还是「flex items-center」（卡片），
  * 结果都是**框**对**框**：股票名与徽章框垂直居中对齐，框下的时间戳在框外、不参与这个居中。
@@ -161,6 +238,8 @@ interface Stock {
   name: string
   market: string
   sort_order?: number
+  /** 用户自记备注：按股票存一条，持仓与关注共用 */
+  note?: string
   agents: StockAgentInfo[]
 }
 
@@ -360,6 +439,12 @@ export default function StocksPage() {
   const [insightInitialTab, setInsightInitialTab] = useState<'uzi' | undefined>(undefined)
   // UZI 调研摘要:key = `${symbol}|${market}`,一次拉全量,不在每行单独请求
   const [uziMap, setUziMap] = useState<Record<string, UziListItem>>({})
+  // TradingAgents 深度分析摘要:key = symbol(analysis_history 只按 stock_symbol 存)。
+  // null = 已确认没有报告(渲染空标签);缺键 = 未取到/请求失败(该行不渲染,避免误报「没分析过」)
+  const [taMap, setTaMap] = useState<Record<string, TaInfo | null>>({})
+  // 记录当前 taMap 对应的是哪一组 symbol(排序后拼接),避免行情刷新时 portfolio 对象变化触发反复全量重拉、
+  // 也避免首屏在数据未到时把所有行先闪成空标签
+  const [taLoadedKey, setTaLoadedKey] = useState<string | null>(null)
 
   // Market status
   const [marketStatus, setMarketStatus] = useState<MarketStatus[]>([])
@@ -421,6 +506,9 @@ export default function StocksPage() {
 
   // Stock list filter
   const [stockListFilter, setStockListFilter] = useState('')  // '' = 全部, 'CN' = A股, 'HK' = 港股, 'US' = 美股
+  // 持仓页的市场筛选。关注页过滤掉持仓股后，持仓页是唯一能看全部持仓的地方；
+  // 而账户只有一个、A股与港股混放，没有市场维度就做不到「只看港股持仓」。
+  const [positionMarketFilter, setPositionMarketFilter] = useState('')
   const viewTab = tour?.active && ['stock', 'quote', 'analysis'].includes(tour.step || '') ? 'watchlist' : savedViewTab
   useEffect(() => {
     if (!tour?.active || !['stock', 'quote', 'analysis'].includes(tour.step || '')) return
@@ -520,6 +608,11 @@ export default function StocksPage() {
   }
   const searchTimer = useRef<ReturnType<typeof setTimeout>>()
   const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // 备注保存成功后就地回写 stocks，避免整页重新拉取（同改 asset_type 的做法）
+  const handleStockNoteSaved = useCallback((stockId: number, note: string) => {
+    setStocks(previous => previous.map(s => (s.id === stockId ? { ...s, note } : s)))
+  }, [])
 
   const buildQuoteItems = useCallback((): QuoteRequestItem[] => {
     return buildQuoteItemsFrom(stocks, portfolioRaw)
@@ -892,6 +985,73 @@ export default function StocksPage() {
   useEffect(() => {
     void loadUziMap()
   }, [loadUziMap])
+
+  // —— TradingAgents 徽章:逐只拉最新结果(后端没有批量接口) ——
+  // 没分析过的票只返回极小的 null;只有真分析过的少数票才回完整 JSON,并发 4 足够。
+  // 用排序后的 symbol 串做稳定 key:行情刷新会替换 portfolio 对象,但 key 不变就不重拉。
+  const taSymbolsKey = useMemo(() => {
+    const symbols = new Set<string>()
+    for (const account of portfolio?.accounts || []) {
+      for (const pos of account.positions || []) if (pos.symbol) symbols.add(pos.symbol)
+    }
+    for (const stock of stocks) if (stock.symbol) symbols.add(stock.symbol)
+    return Array.from(symbols).sort().join(',')
+  }, [portfolio, stocks])
+
+  // 加载期间 symbol 集合可能变化(持仓/关注刚加载完);用 ref 记住最新 key,
+  // 只有「本次结果对应的 key 仍是当前 key」才写入,避免旧结果覆盖新集合导致徽章不出现
+  const taSymbolsKeyRef = useRef(taSymbolsKey)
+  taSymbolsKeyRef.current = taSymbolsKey
+
+  const loadTaMap = useCallback(async () => {
+    const runKey = taSymbolsKey
+    const symbols = runKey ? runKey.split(',').filter(Boolean) : []
+    if (symbols.length === 0) {
+      setTaLoadedKey(runKey)
+      return
+    }
+    const next: Record<string, TaInfo | null> = {}
+    const queue = [...symbols]
+    const worker = async () => {
+      while (queue.length > 0) {
+        const symbol = queue.shift()
+        if (!symbol) continue
+        try {
+          next[symbol] = buildTaInfo(await tradingAgentsApi.getLatestForStock(symbol))
+        } catch {
+          // 请求失败不写键 → 该行不渲染,避免把「取不到」误报成「没分析过」
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(4, symbols.length) }, () => worker()))
+    if (taSymbolsKeyRef.current === runKey) {
+      setTaMap(next)
+      setTaLoadedKey(runKey)
+    }
+  }, [taSymbolsKey])
+
+  // 弹窗关闭后只刷新这一只,比全量重拉便宜
+  const refreshTaForSymbol = useCallback(async (symbol: string) => {
+    try {
+      const result = await tradingAgentsApi.getLatestForStock(symbol)
+      setTaMap((prev) => ({ ...prev, [symbol]: buildTaInfo(result) }))
+    } catch {
+      /* 静默:徽章保持旧值,不影响主流程 */
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadTaMap()
+  }, [loadTaMap])
+
+  // 回到前台刷新一次:覆盖「点了后台运行、跑完回来」的场景
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void loadTaMap()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [loadTaMap])
 
   const formatPreviewTime = (iso: string): string => {
     try {
@@ -1521,9 +1681,47 @@ export default function StocksPage() {
     return (portfolio?.accounts || []).reduce((acc, a) => acc + (a.positions?.length || 0), 0)
   }, [portfolio])
 
-  const watchlistCount = useMemo(() => {
-    return stocks.length
-  }, [stocks])
+  // 关注页只放「想关注但还没买」的票，持仓股归持仓页。
+  // 技术徽章的 hasPosition 目前按页面位置硬编码（自选卡一律 false），持仓股若留在关注页
+  // 会显示「买入 / 回避」这类对已持有者无意义的动作，因此在渲染层整体排除。
+  const heldKeys = useMemo(() => {
+    const set = new Set<string>()
+    for (const account of portfolio?.accounts || []) {
+      for (const pos of account.positions) {
+        set.add(`${String(pos.market || 'CN').toUpperCase()}:${String(pos.symbol || '').toUpperCase()}`)
+      }
+    }
+    return set
+  }, [portfolio])
+
+  const watchlistStocks = useMemo(() => {
+    return stocks.filter(
+      s => !heldKeys.has(`${String(s.market || 'CN').toUpperCase()}:${String(s.symbol || '').toUpperCase()}`),
+    )
+  }, [stocks, heldKeys])
+
+  const watchlistCount = watchlistStocks.length
+
+  // 持仓页的市场筛选：'' = 全部。只在渲染层过滤，账户级统计（市值/盈亏）仍是全量。
+  const filterPositions = useCallback(
+    (list: Position[]) =>
+      positionMarketFilter
+        ? list.filter(p => String(p.market || 'CN').toUpperCase() === positionMarketFilter)
+        : list,
+    [positionMarketFilter],
+  )
+
+  const positionMarketCounts = useMemo(() => {
+    const counts: Record<string, number> = { '': 0, CN: 0, HK: 0, US: 0 }
+    for (const account of portfolio?.accounts || []) {
+      for (const pos of account.positions) {
+        counts[''] += 1
+        const mk = String(pos.market || 'CN').toUpperCase()
+        counts[mk] = (counts[mk] || 0) + 1
+      }
+    }
+    return counts
+  }, [portfolio])
 
   const toggleAccountExpanded = (id: number) => {
     setExpandedAccounts(prev => {
@@ -1920,7 +2118,36 @@ export default function StocksPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {portfolio?.accounts.map(account => (
+            <div className="flex items-center justify-between gap-1">
+              <div className="text-[11px] text-muted-foreground/70 truncate">
+                {positionMarketFilter ? stockT('stocksPage.messages.positionStatsHint') : ''}
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                {[
+                { value: '', label: stockT('stocksPage.markets.all'), count: positionMarketCounts[''] },
+                { value: 'CN', label: stockT('stocksPage.markets.cn'), count: positionMarketCounts.CN },
+                { value: 'HK', label: stockT('stocksPage.markets.hk'), count: positionMarketCounts.HK },
+                { value: 'US', label: stockT('stocksPage.markets.us'), count: positionMarketCounts.US },
+              ]
+                .filter(opt => opt.value === '' || opt.count > 0)
+                .map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setPositionMarketFilter(opt.value)}
+                    className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
+                      positionMarketFilter === opt.value
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-accent/50 text-muted-foreground hover:bg-accent'
+                    }`}
+                  >
+                    {opt.label} ({opt.count})
+                  </button>
+                ))}
+              </div>
+            </div>
+            {portfolio?.accounts
+              .filter(account => !positionMarketFilter || filterPositions(account.positions).length > 0)
+              .map(account => (
               <div key={account.id} className="card overflow-hidden">
               {/* Account Header */}
               <div
@@ -1936,11 +2163,19 @@ export default function StocksPage() {
                   <Building2 className="w-4 h-4 text-primary" />
                   <span className="text-[14px] md:text-[15px] font-semibold text-foreground">{account.name}</span>
                   <span className="text-[11px] md:text-[12px] text-muted-foreground">
-                    {stockT('stocksPage.messages.positionCount', { count: account.positions.length })}
+                    {positionMarketFilter
+                      ? stockT('stocksPage.messages.positionCountFiltered', {
+                          shown: filterPositions(account.positions).length,
+                          total: account.positions.length,
+                        })
+                      : stockT('stocksPage.messages.positionCount', { count: account.positions.length })}
                   </span>
                 </div>
                 <div className="flex items-center justify-between md:justify-end gap-2 md:gap-6 pl-6 md:pl-0">
-                  <div className="flex items-center gap-2.5 md:gap-6 min-w-0">
+                  <div
+                    className="flex items-center gap-2.5 md:gap-6 min-w-0"
+                    title={positionMarketFilter ? stockT('stocksPage.messages.positionStatsHint') : undefined}
+                  >
                     <div className="text-left md:text-right">
                       <div className="text-[10px] md:text-[11px] text-muted-foreground">{stockT('stocksPage.messages.marketValue')}</div>
                       <div className="text-[12px] md:text-[13px] font-mono font-medium whitespace-nowrap">{unpricedAccountIds.has(account.id) ? '--' : formatMoney(account.total_market_value)}</div>
@@ -1985,7 +2220,7 @@ export default function StocksPage() {
               {/* Positions */}
               {expandedAccounts.has(account.id) && (
                 <div className="border-t border-border/30">
-                  {account.positions.length === 0 ? (
+                  {filterPositions(account.positions).length === 0 ? (
                     <p className="text-[13px] text-muted-foreground text-center py-8">{stockT('stocksPage.messages.noPositions')}</p>
                   ) : (
                     <>
@@ -2009,7 +2244,7 @@ export default function StocksPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {account.positions.map((pos, i) => {
+                            {filterPositions(account.positions).map((pos, i) => {
                               const stock = stocks.find(s => s.id === pos.stock_id)
                               const badge = marketBadge(pos.market)
                               const isForeign = pos.market === 'HK' || pos.market === 'US'
@@ -2064,6 +2299,12 @@ export default function StocksPage() {
                                         {pos.name}
                                         {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
                                       </button>
+                                      <ThsLink symbol={pos.symbol} market={pos.market} name={pos.name} />
+                                      <StockNoteButton
+                                        stockId={pos.stock_id}
+                                        note={stock?.note}
+                                        onSaved={handleStockNoteSaved}
+                                      />
                                     </NameRow>
                                     {(() => {
                                       const uzi = uziMap[`${pos.symbol}|${pos.market}`]
@@ -2071,6 +2312,14 @@ export default function StocksPage() {
                                         <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
                                       ) : (
                                         <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                      )
+                                    })()}
+                                    {taLoadedKey === taSymbolsKey && (() => {
+                                      const ta = taMap[pos.symbol]
+                                      return ta ? (
+                                        <TaTag info={ta} onOpen={() => openDeepAnalysis(pos.stock_id, pos.symbol, pos.name)} />
+                                      ) : (
+                                        <TaEmptyTag onOpen={() => openDeepAnalysis(pos.stock_id, pos.symbol, pos.name)} />
                                       )
                                     })()}
                                     {(() => {
@@ -2085,6 +2334,7 @@ export default function StocksPage() {
                                             kline={kline}
                                             market={pos.market}
                                             hasPosition={true}
+                                            onReEvaluated={() => loadPoolSuggestions()}
                                           />
                                         </span>
                                       ) : null
@@ -2200,7 +2450,7 @@ export default function StocksPage() {
 
                       {/* Mobile Cards */}
                       <div className="md:hidden divide-y divide-border/30">
-                        {account.positions.map(pos => {
+                        {filterPositions(account.positions).map(pos => {
                           const stock = stocks.find(s => s.id === pos.stock_id)
                           const badge = marketBadge(pos.market)
                           const changeColor = marketSignTextClass(pos.change_pct)
@@ -2253,6 +2503,12 @@ export default function StocksPage() {
                                       {pos.name}
                                       {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
                                     </button>
+                                    <ThsLink symbol={pos.symbol} market={pos.market} name={pos.name} />
+                                    <StockNoteButton
+                                      stockId={pos.stock_id}
+                                      note={stock?.note}
+                                      onSaved={handleStockNoteSaved}
+                                    />
                                   </NameRow>
                                   {(() => {
                                     const uzi = uziMap[`${pos.symbol}|${pos.market}`]
@@ -2260,6 +2516,14 @@ export default function StocksPage() {
                                       <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
                                     ) : (
                                       <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                    )
+                                  })()}
+                                  {taLoadedKey === taSymbolsKey && (() => {
+                                    const ta = taMap[pos.symbol]
+                                    return ta ? (
+                                      <TaTag info={ta} onOpen={() => openDeepAnalysis(pos.stock_id, pos.symbol, pos.name)} />
+                                    ) : (
+                                      <TaEmptyTag onOpen={() => openDeepAnalysis(pos.stock_id, pos.symbol, pos.name)} />
                                     )
                                   })()}
                                   {pos.trading_style && (
@@ -2288,6 +2552,7 @@ export default function StocksPage() {
                                       kline={kline}
                                       market={pos.market}
                                       hasPosition={true}
+                                      onReEvaluated={() => loadPoolSuggestions()}
                                     />
                                   </div>
                                 ) : null
@@ -2393,10 +2658,10 @@ export default function StocksPage() {
             <h3 className="text-[13px] font-semibold text-foreground">{stockT('stocksPage.messages.watchlist')}</h3>
             <div className="flex items-center gap-1">
               {[
-                { value: '', label: stockT('stocksPage.markets.all'), count: stocks.length },
-                { value: 'CN', label: stockT('stocksPage.markets.cn'), count: stocks.filter(s => s.market === 'CN').length },
-                { value: 'HK', label: stockT('stocksPage.markets.hk'), count: stocks.filter(s => s.market === 'HK').length },
-                { value: 'US', label: stockT('stocksPage.markets.us'), count: stocks.filter(s => s.market === 'US').length },
+                { value: '', label: stockT('stocksPage.markets.all'), count: watchlistStocks.length },
+                { value: 'CN', label: stockT('stocksPage.markets.cn'), count: watchlistStocks.filter(s => s.market === 'CN').length },
+                { value: 'HK', label: stockT('stocksPage.markets.hk'), count: watchlistStocks.filter(s => s.market === 'HK').length },
+                { value: 'US', label: stockT('stocksPage.markets.us'), count: watchlistStocks.filter(s => s.market === 'US').length },
               ].map(opt => (
                 <button
                   key={opt.value}
@@ -2429,14 +2694,23 @@ export default function StocksPage() {
               </button>
             </div>
           </div>
-          {stocks.length === 0 ? (
+          {watchlistStocks.length === 0 ? (
             <div className="py-12 text-center">
-              <div className="text-[13px] text-muted-foreground">{stockT('stocksPage.messages.noWatchlist')}</div>
-              <div className="mt-2 text-[11px] text-muted-foreground/70">{stockT('stocksPage.messages.startAddWatchlist')}</div>
+              {stocks.length === 0 ? (
+                <>
+                  <div className="text-[13px] text-muted-foreground">{stockT('stocksPage.messages.noWatchlist')}</div>
+                  <div className="mt-2 text-[11px] text-muted-foreground/70">{stockT('stocksPage.messages.startAddWatchlist')}</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-[13px] text-muted-foreground">{stockT('stocksPage.messages.noWatchlistAllHeld')}</div>
+                  <div className="mt-2 text-[11px] text-muted-foreground/70">{stockT('stocksPage.messages.startAddWatchlistAllHeld')}</div>
+                </>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {stocks
+              {watchlistStocks
                 .filter(s => !stockListFilter || s.market === stockListFilter)
                 .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0) || a.id - b.id)
                 .filter(stock => {
@@ -2508,6 +2782,12 @@ export default function StocksPage() {
                               {stock.name}
                               {stock.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
                             </button>
+                            <ThsLink symbol={stock.symbol} market={stock.market} name={stock.name} />
+                            <StockNoteButton
+                              stockId={stock.id}
+                              note={stock.note}
+                              onSaved={handleStockNoteSaved}
+                            />
                           </NameRow>
                           {(() => {
                             const uzi = uziMap[`${stock.symbol}|${stock.market}`]
@@ -2515,6 +2795,14 @@ export default function StocksPage() {
                               <UziTag info={uzi} onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} />
                             ) : (
                               <UziEmptyTag onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} />
+                            )
+                          })()}
+                          {taLoadedKey === taSymbolsKey && (() => {
+                            const ta = taMap[stock.symbol]
+                            return ta ? (
+                              <TaTag info={ta} onOpen={() => openDeepAnalysis(stock.id, stock.symbol, stock.name)} />
+                            ) : (
+                              <TaEmptyTag onOpen={() => openDeepAnalysis(stock.id, stock.symbol, stock.name)} />
                             )
                           })()}
                         </div>
@@ -2538,6 +2826,7 @@ export default function StocksPage() {
                           kline={kline}
                           market={stock.market}
                           hasPosition={false}
+                          onReEvaluated={() => loadPoolSuggestions()}
                         />
                       ) : (
                         <div className="text-[11px] text-muted-foreground/70 py-2">{stockT('stocksPage.messages.noAnalysis')}</div>
@@ -2653,7 +2942,14 @@ export default function StocksPage() {
       {deepAnalysisTarget && (
         <DeepAnalysisModal
           open={!!deepAnalysisTarget}
-          onOpenChange={(open) => { if (!open) setDeepAnalysisTarget(null) }}
+          onOpenChange={(open) => {
+            if (!open) {
+              // 关闭时刷新这一只的徽章:覆盖「刚跑完 / 刚强制重跑」的场景
+              const symbol = deepAnalysisTarget?.symbol
+              setDeepAnalysisTarget(null)
+              if (symbol) void refreshTaForSymbol(symbol)
+            }
+          }}
           stockId={deepAnalysisTarget.stockId}
           stockSymbol={deepAnalysisTarget.symbol}
           stockName={deepAnalysisTarget.name}
