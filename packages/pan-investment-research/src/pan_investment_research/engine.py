@@ -20,6 +20,14 @@ from .prompts import ROLES, instructions
 from .fast import build_fast_graph
 
 
+def strip_code_fence(content: str) -> str:
+    """Models keep wrapping the JSON contract in Markdown fences despite prompts; accept the fenced form."""
+    lines = content.strip().splitlines()
+    if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return content
+
+
 def merge_artifacts(left, right):
     for key in left.keys() & right.keys():
         if left[key] != right[key]:
@@ -251,7 +259,7 @@ class InvestmentResearch:
         reply, messages = await self._model(role, payload, deps)
         for attempt in range(2):
             try:
-                report = RoleReport.model_validate_json(reply.content)
+                report = RoleReport.model_validate_json(strip_code_fence(reply.content))
                 evidence = (prepared or deps.prepared).evidence + [e for a in deps.artifacts.values() for e in a.evidence]
                 self._validate(report, prepared or deps.prepared, evidence, role)
                 if role == "strategy":
@@ -267,7 +275,8 @@ class InvestmentResearch:
                 deps.repaired.add(role)
                 await deps.emit(role, "repair", reason=str(exc)[:300])
                 messages += [{"role": "assistant", "content": reply.content},
-                             {"role": "user", "content": f"Repair this contract error without adding facts: {exc}"}]
+                             {"role": "user", "content": f"Repair this contract error without adding facts: {exc} "
+                              "Return only the raw JSON object matching the schema; no Markdown fences or commentary."}]
                 reply, _ = await self._model(role, payload, deps, messages=messages)
 
     def _validate_session(self, report, prepared, profile, visible_evidence):
@@ -347,9 +356,10 @@ class InvestmentResearch:
                     found = await asyncio.wait_for(deps.tools.execute(fn["name"], args,
                         stock_keys=[s.key for s in prepared.securities]), deps.budget.remaining())
                 except ValueError:
-                    if state["role"] in deps.repaired:
+                    key = f"{state.get('group', 'portfolio')}/{state.get('epoch', 0)}/{state['role']}"
+                    if key in deps.repaired:
                         raise
-                    deps.repaired.add(state["role"])
+                    deps.repaired.add(key)
                     messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps({
                         "error": "Invalid or out-of-scope detail request; no evidence retrieved. Use only the evidence already supplied, disclose missing details, and return the report without further tool calls."})})
                     await deps.emit(state["role"], "tool_rejected", tool=fn["name"])
@@ -373,18 +383,20 @@ class InvestmentResearch:
         async def finish(state, runtime: Runtime[Dependencies]):
             prepared = ResearchInput.model_validate(state["prepared"])
             deps, reply = runtime.context, state["reply"]
+            key = f"{state.get('group', 'portfolio')}/{state.get('epoch', 0)}/{state['role']}"
             try:
-                report = RoleReport.model_validate_json(reply.content)
+                report = RoleReport.model_validate_json(strip_code_fence(reply.content))
                 self._validate(report, prepared, prepared.evidence, state["role"])
             except ValueError as exc:
-                if state["role"] in deps.repaired:
+                if key in deps.repaired:
                     raise
-                deps.repaired.add(state["role"])
+                deps.repaired.add(key)
                 await deps.emit(state["role"], "repair", reason=str(exc)[:300])
                 messages = state["messages"] + [{"role": "assistant", "content": reply.content},
-                    {"role": "user", "content": f"Repair the JSON contract without adding facts: {exc}"}]
+                    {"role": "user", "content": f"Repair the JSON contract without adding facts: {exc} "
+                     "Return only the raw JSON object matching the schema; no Markdown fences or commentary."}]
                 reply, _ = await self._model(state["role"], {"input": market_input(prepared)}, deps, messages=messages)
-                report = RoleReport.model_validate_json(reply.content)
+                report = RoleReport.model_validate_json(strip_code_fence(reply.content))
                 self._validate(report, prepared, prepared.evidence, state["role"])
             return self._store(state, state["role"], report, reply.model,
                                runtime.context, prepared.evidence)

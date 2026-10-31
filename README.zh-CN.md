@@ -34,6 +34,15 @@
 
 > 🧠 **持仓页点一下 → TradingAgents 9-Agent 投研团队接力分析 → 看多看空辩论 → 风控审查 → PM 决策书,3-5 分钟一条完整推理链,结论直推到你的 IM。**
 
+<details open>
+<summary>❤️ 赞助商</summary>
+
+| Logo | 简介 |
+| --- | --- |
+| <a href="https://88api.ai/sign-up?aff=W38W"><img src="./docs/sponsors/88api-logo.png" alt="88API" width="120"></a> | [**88API Token 聚合平台**](https://88api.ai/sign-up?aff=W38W)<br><br>🧠 聚合 GPT、Claude、Gemini、Grok、DeepSeek、Kimi、GLM 等语言与编程模型；<br>🎨 图片模型：GPT-Image、Gemini、Grok 等；<br>🎬 视频模型：Seedance、Veo、MiniMax H3、Kling、Grok 等；<br>🎙️ 语音能力：Whisper、TTS 等。从文案、出图、改图，到视频生成与配音<br>🎁新用户注册送体验额度，可以检测模型能力。站内有人工客服值守！<br>👉香港正规企业运营 稳定供应 全绿满血 不降智 提供发票<br><br>[**立即注册 →**](https://88api.ai/sign-up?aff=W38W) |
+
+</details>
+
 ## 📸 功能一览
 
 | 持仓 · 多账户汇总 | 机会页 · AI 评分选股 |
@@ -214,7 +223,7 @@ docker compose up -d
 <details>
 <summary>本地开发</summary>
 
-**环境要求**：Python 3.10+ / Node.js 24.14.0 / pnpm 9.15.9
+**环境要求**：Python 3.11+ / Node.js 24.14.0 / pnpm 9.15.9
 
 ```bash
 # 一键开发（推荐）
@@ -345,13 +354,3 @@ PanWatch 完全免费开源。如果它节省了你的时间或改善了工作�
 ## License
 
 [MIT](LICENSE)
-
-### LangGraph 多 Agent 投研
-
-盘前、盘中、收盘统一使用可独立安装的 [Pan Investment Research 包](packages/pan-investment-research/README.zh-CN.md)。在 Agent 页的「投研编排」选择经过校验的图模板、专家、论证策略与整轮预算。盘中使用确定性变化门控及精简专家／决策图，无变化不调用模型、不覆盖上次建议；盘前提供开盘情景，收盘提供走势归因与基于已提供盘前计划的复核。
-
-市场模型不接收账户现金，研究定稿后由必经规则节点核对账户与报价限制。v139 迁移将旧 legacy／shadow 执行模式统一切到新图，并保留设置与历史记录。三个旧时段 prompt 与文本解析器已删除；TradingAgents 深度分析继续独立运行。
-
-盘前和收盘一次分析所有绑定股票，按组共享专家，再统一进行组合策略、风控和定稿。证据详情支持多股票批量读取；默认上下文、输出和 token 容量随标的数量调整，显式配置的全局上限保持有效，时间与并发限制不随股票数增加。
-
-模型候选和只读证据工具共用显式的请求、token、并发和时间限制。未解决的异议或预算不足会标记研究未完成，仅保留已校验的策略草案；没有策略时不生成虚假的观望建议。完整研究的图产物、标准化建议、预测跟踪与交付声明在同一事务中保存，未完成研究不进入正式建议或预测统计。通知回执不明确时记录状态，不盲目重发。首期不启用跨进程图续跑及 outbox 自动恢复。研究结果不会下单，也不会推断已核验的购买力。

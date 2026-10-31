@@ -34,6 +34,15 @@
 
 > 🧠 **Start from a portfolio holding → let a nine-agent TradingAgents research team analyze it → follow the bull/bear debate and risk review → receive a PM decision memo and the complete reasoning trail in your messaging app within 3–5 minutes.**
 
+<details open>
+<summary>❤️ Sponsors</summary>
+
+| Logo | Introduction |
+| --- | --- |
+| <a href="https://88api.ai/sign-up?aff=W38W"><img src="./docs/sponsors/88api-logo.png" alt="88API" width="120"></a> | [**88API Token Aggregation Platform**](https://88api.ai/sign-up?aff=W38W)<br><br>🧠 Access language and coding models including GPT, Claude, Gemini, Grok, DeepSeek, Kimi, and GLM;<br>🎨 Image models: GPT-Image, Gemini, Grok, and more;<br>🎬 Video models: Seedance, Veo, MiniMax H3, Kling, Grok, and more;<br>🎙️ Speech capabilities: Whisper, TTS, and more. From copywriting and image generation and editing to video generation and voiceovers.<br>🎁 New users receive trial credits upon registration to test model capabilities. Live customer support is available on the site!<br>👉 Operated by a registered Hong Kong company · Stable availability · Fully operational, full-capability service · No reduced model intelligence · Invoices available<br><br>[**Register now →**](https://88api.ai/sign-up?aff=W38W) |
+
+</details>
+
 ## 📸 Feature Overview
 
 The screenshots below use the English interface; Simplified Chinese is available throughout the same product surfaces.
@@ -218,7 +227,7 @@ Select the brain icon beside a holding to start TradingAgents deep analysis. Fou
 <details>
 <summary>Local development</summary>
 
-**Requirements:** Python 3.10+ / Node.js 24.14.0 / pnpm 9.15.9
+**Requirements:** Python 3.11+ / Node.js 24.14.0 / pnpm 9.15.9
 
 ```bash
 # One-command development setup (recommended)
@@ -351,13 +360,3 @@ Community chat (Telegram): [t.me/panwatch](https://t.me/panwatch)
 ## License
 
 [MIT](LICENSE)
-
-### LangGraph investment research
-
-Premarket, intraday and postmarket all use the independently installable [Pan Investment Research package](packages/pan-investment-research/README.md). Choose validated graph templates, specialists, debate policy and per-run budgets in **Research orchestration** on the Agents page. Intraday uses a deterministic change gate and a short expert/decision graph; quiet snapshots use no model and preserve previous advice. Premarket adds opening scenarios; postmarket adds attribution and evidence-linked review of supplied premarket plans.
-
-Market models do not receive account cash. Mandatory execution rules apply account and quote restrictions after market research. Migration v139 retires the old legacy/shadow execution modes while preserving settings and history. The three old session prompts and text parsers are removed; TradingAgents deep analysis remains independent.
-
-Premarket and postmarket analyze all bound stocks together, sharing specialists within groups and running portfolio strategy, risk and finalization once. Evidence details support batch reads across stocks. Default context, output and token capacities adjust to target count; explicit global caps remain effective, and time and concurrency limits do not grow with the watchlist.
-
-Model candidates and read-only evidence tools share explicit attempt, token, concurrency and time limits. Unresolved objections or exhausted budgets mark research incomplete and retain only validated strategy drafts; no watch suggestion is fabricated when no strategy finished. Completed graph artifacts, normalized suggestions, prediction tracking and delivery claims commit atomically; incomplete research does not publish formal suggestions or prediction outcomes. Unknown notification acknowledgements are recorded without blind replay. Cross-process graph resumption and automatic outbox recovery are not enabled. This research output does not place orders or establish verified buying power.
