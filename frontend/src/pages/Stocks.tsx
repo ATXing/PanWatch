@@ -2043,33 +2043,34 @@ export default function StocksPage() {
                 <div className="flex items-center justify-between md:justify-end gap-2 md:gap-6 pl-6 md:pl-0">
                   <div
                     className="flex items-center gap-2.5 md:gap-6 min-w-0"
+                    data-testid={`account-amounts-${account.id}`}
                     title={positionMarketFilter ? stockT('stocksPage.messages.positionStatsHint') : undefined}
                   >
                     <div className="text-left md:text-right">
                       <div className="text-[10px] md:text-[11px] text-muted-foreground">{stockT('stocksPage.messages.marketValue')}</div>
-                      <div className="text-[12px] md:text-[13px] font-mono font-medium whitespace-nowrap">{unpricedAccountIds.has(account.id) ? '--' : formatMoney(account.total_market_value)}</div>
+                      <div className="text-[12px] md:text-[13px] font-mono font-medium whitespace-nowrap">{unpricedAccountIds.has(account.id) ? '--' : maskVal(formatMoney(account.total_market_value))}</div>
                     </div>
                     <div className="text-left md:text-right">
                       <div className="text-[10px] md:text-[11px] text-muted-foreground">{stockT('stocksPage.messages.pnl')}</div>
                       <div className={`text-[12px] md:text-[13px] font-mono font-medium whitespace-nowrap ${marketSignTextClass(unpricedAccountIds.has(account.id) ? null : account.total_pnl)}`}>
-                        {unpricedAccountIds.has(account.id) ? '--' : `${account.total_pnl >= 0 ? '+' : ''}${formatMoney(account.total_pnl)}`}
-                        {!unpricedAccountIds.has(account.id) && <span className="text-[10px] md:text-[11px] ml-1 hidden md:inline">({account.total_pnl_pct >= 0 ? '+' : ''}{account.total_pnl_pct.toFixed(2)}%)</span>}
+                        {unpricedAccountIds.has(account.id) ? '--' : maskVal(`${account.total_pnl >= 0 ? '+' : ''}${formatMoney(account.total_pnl)}`)}
+                        {!unpricedAccountIds.has(account.id) && <span className="text-[10px] md:text-[11px] ml-1 hidden md:inline">({maskVal(`${account.total_pnl_pct >= 0 ? '+' : ''}${account.total_pnl_pct.toFixed(2)}%`)})</span>}
                       </div>
                       {!unpricedAccountIds.has(account.id) && account.total_net_pnl != null && (
                         <div className="text-[10px] md:text-[11px] font-mono text-muted-foreground whitespace-nowrap">
-                          净 {account.total_net_pnl >= 0 ? '+' : ''}{formatMoney(account.total_net_pnl)} ({account.total_net_pnl_pct != null ? `${account.total_net_pnl_pct >= 0 ? '+' : ''}${account.total_net_pnl_pct.toFixed(2)}%` : ''})
+                          净 {maskVal(`${account.total_net_pnl >= 0 ? '+' : ''}${formatMoney(account.total_net_pnl)}`)} ({account.total_net_pnl_pct != null ? maskVal(`${account.total_net_pnl_pct >= 0 ? '+' : ''}${account.total_net_pnl_pct.toFixed(2)}%`) : ''})
                         </div>
                       )}
                     </div>
                     <div className="text-left md:text-right">
                       <div className="text-[10px] md:text-[11px] text-muted-foreground">{stockT('stocksPage.messages.today')}</div>
                       <div className={`text-[12px] md:text-[13px] font-mono font-medium whitespace-nowrap ${marketSignTextClass(unpricedAccountIds.has(account.id) ? null : account.total_daily_pnl)}`}>
-                        {unpricedAccountIds.has(account.id) ? '--' : `${account.total_daily_pnl >= 0 ? '+' : ''}${formatMoney(account.total_daily_pnl)}`}
+                        {unpricedAccountIds.has(account.id) ? '--' : maskVal(`${account.total_daily_pnl >= 0 ? '+' : ''}${formatMoney(account.total_daily_pnl)}`)}
                       </div>
                     </div>
                     <div className="text-left md:text-right hidden sm:block">
                       <div className="text-[10px] md:text-[11px] text-muted-foreground">{stockT('stocksPage.messages.availableFundsShort')}</div>
-                      <div className="text-[12px] md:text-[13px] font-mono whitespace-nowrap">{formatMoney(account.available_funds)}</div>
+                      <div className="text-[12px] md:text-[13px] font-mono whitespace-nowrap">{maskVal(formatMoney(account.available_funds))}</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-0 md:gap-1 shrink-0" onClick={e => e.stopPropagation()}>

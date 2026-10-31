@@ -69,9 +69,15 @@ it('shows portfolio amounts by default and masks them when the privacy eye is to
   expect(summary.getAllByText('••••').length).toBeGreaterThanOrEqual(6)
   expect(localStorage.getItem('panwatch_stocks_privacyHidden')).toBe('true')
 
-  // 再点恢复
+  // 账户行（测试账户后面的市值/盈亏/可用资金）同步打码
+  const accountAmounts = within(screen.getByTestId('account-amounts-1'))
+  await waitFor(() => expect(accountAmounts.queryAllByText('1.50万')).toHaveLength(0))
+  expect(accountAmounts.getAllByText('••••').length).toBeGreaterThanOrEqual(4)
+
+  // 再点恢复：汇总卡与账户行都恢复真实金额
   await user.click(screen.getByRole('button', { name: '隐藏/显示持仓金额' }))
   await waitFor(() => expect(summary.getAllByText('1.50万').length).toBeGreaterThan(0))
+  expect(accountAmounts.getAllByText('1.50万').length).toBeGreaterThan(0)
   expect(localStorage.getItem('panwatch_stocks_privacyHidden')).toBe('false')
 })
 
@@ -79,10 +85,11 @@ it('keeps amounts masked after a reload when the preference is stored', async ()
   localStorage.setItem('panwatch_stocks_privacyHidden', 'true')
   await setupPage()
   const summary = within(screen.getByTestId('portfolio-summary'))
-  // 汇总卡全程打码
+  // 汇总卡与账户行全程打码
   expect(summary.queryAllByText('1.50万')).toHaveLength(0)
   expect(summary.queryAllByText('5.00万')).toHaveLength(0)
   expect(summary.getAllByText('••••').length).toBeGreaterThanOrEqual(6)
+  expect(within(screen.getByTestId('account-amounts-1')).getAllByText('••••').length).toBeGreaterThanOrEqual(4)
   // 点眼睛恢复显示
   const user = userEvent.setup()
   await user.click(screen.getByRole('button', { name: '隐藏/显示持仓金额' }))
