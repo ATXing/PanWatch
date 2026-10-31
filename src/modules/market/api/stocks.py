@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.platform.persistence.database import get_db
 from src.platform.persistence.models import (
@@ -42,6 +42,8 @@ class StockCreate(BaseModel):
 class StockUpdate(BaseModel):
     name: str | None = None
     asset_type: AssetType | None = None
+    # 用户备注。传 "" 表示清空（update_stock 的 exclude_none 会丢弃 null，所以清空只能发空串）
+    note: str | None = Field(default=None, max_length=500)
 
 
 class StockAgentInfo(BaseModel):
@@ -59,6 +61,7 @@ class StockResponse(BaseModel):
     market: str
     asset_type: AssetType = "stock"
     sort_order: int
+    note: str = ""
     agents: list[StockAgentInfo] = []
 
     class Config:
@@ -112,6 +115,7 @@ def _stock_to_response(stock: Stock, agent_display_names: dict[str, str] | None 
         "market": stock.market,
         "asset_type": infer_asset_type(stock.name, getattr(stock, "asset_type", None)),
         "sort_order": stock.sort_order or 0,
+        "note": getattr(stock, "note", None) or "",
         "agents": [
             {
                 "agent_name": sa.agent_name,

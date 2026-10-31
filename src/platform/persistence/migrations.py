@@ -2238,6 +2238,13 @@ def _m139_retire_session_legacy(conn: Connection) -> None:
                      {"id": identity, "config": json.dumps(config, ensure_ascii=False)})
 
 
+def _m140_stock_note(conn: Connection) -> None:
+    """用户自记备注：挂在 stocks 上，持仓页与关注列表共用同一条。"""
+    _add_column_if_missing(
+        conn, "stocks", "note", "ALTER TABLE stocks ADD COLUMN note TEXT"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(101, "agent_config_kind_and_visibility", _m101_agent_config_kind),
     Migration(102, "backfill_agent_kind_data", _m102_backfill_agent_kind),
@@ -2278,6 +2285,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(137, "stock_asset_type", _m137_stock_asset_type),
     Migration(138, "investment_research_delivery", _m138_investment_research),
     Migration(139, "retire_session_legacy", _m139_retire_session_legacy),
+    Migration(140, "stock_note", _m140_stock_note),
 )
 
 

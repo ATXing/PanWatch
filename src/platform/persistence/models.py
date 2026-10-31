@@ -88,6 +88,9 @@ class Stock(Base):
     name = Column(String, nullable=False)
     market = Column(String, nullable=False)  # CN / HK / US
     asset_type = Column(String, nullable=False, default="stock", server_default="stock")
+    # 用户自记备注：按股票存一条，持仓页与关注列表共用（转持仓时备注跟着走）。
+    # 可空而非 NOT NULL DEFAULT ''：SQLite 的 ALTER TABLE ADD COLUMN 加不必回填，读时用 `or ""` 归一。
+    note = Column(Text, nullable=True)
     # 以下字段已废弃，持仓信息移至 Position 表
     cost_price = Column(Float, nullable=True)
     quantity = Column(Integer, nullable=True)

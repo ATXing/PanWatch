@@ -16,6 +16,8 @@ export interface StockItem {
   market: string
   asset_type?: AssetType
   sort_order?: number
+  /** 用户自记备注（按股票存一条，持仓页与关注列表共用） */
+  note?: string
   agents?: StockAgentInfo[]
 }
 
@@ -40,6 +42,7 @@ export interface TriggerStockAgentOptions {
   bypass_market_hours?: boolean
   allow_unbound?: boolean
   wait?: boolean
+  force_refresh?: boolean
   symbol?: string
   market?: string
   name?: string
@@ -73,6 +76,12 @@ export const stocksApi = {
       body: JSON.stringify(payload),
     }),
   remove: (id: number) => fetchAPI<{ ok: boolean }>(`/stocks/${id}`, { method: 'DELETE' }),
+  /** 只写备注。注意：清空必须传空串，传 null 会被后端 exclude_none 丢弃（看起来成功但没清掉） */
+  updateNote: (id: number, note: string) =>
+    fetchAPI<StockItem>(`/stocks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ note }),
+    }),
   updateAgents: (id: number, payload: StockAgentUpdatePayload) =>
     fetchAPI<StockItem>(`/stocks/${id}/agents`, {
       method: 'PUT',
