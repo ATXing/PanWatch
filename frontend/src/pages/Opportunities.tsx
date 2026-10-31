@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useLocalStorage } from '@/lib/utils'
 import StockInsightModal from '@panwatch/biz-ui/components/stock-insight-modal'
 import FactorWeightsPanel from '@/components/FactorWeightsPanel'
+import { ThsLink } from '@/components/ThsLink'
 import SignalScoreShareCard from '@/components/SignalScoreShareCard'
 
 type SourceFilter = 'all' | 'market_scan' | 'watchlist' | 'mixed'
@@ -116,6 +117,44 @@ const hasEntryPlan = (item: StrategySignalItem) => {
   const breakdown = item.score_breakdown || {}
   if (typeof breakdown.has_entry_plan === 'boolean') return breakdown.has_entry_plan
   return toNumberOrNull(item.entry_low) != null || toNumberOrNull(item.entry_high) != null
+}
+
+/** 两个日期之间跨了几个交易日（只跳周末，不含节假日）。用于判断技术指标落后多久。 */
+const tradingDaysBehind = (asof: string, ref: string): number | null => {
+  const start = new Date(`${asof}T00:00:00`)
+  const end = new Date(`${ref}T00:00:00`)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null
+  let days = 0
+  const cursor = new Date(start)
+  while (cursor < end) {
+    cursor.setDate(cursor.getDate() + 1)
+    const weekday = cursor.getDay()
+    if (weekday !== 0 && weekday !== 6) days += 1
+  }
+  return days
+}
+
+/**
+ * 卡片上的「K线 10-23」标记。
+ * 机会页的动作是基于候选快照那一刻的技术指标算的，而 K 线可能已经落后几天——
+ * 落后 ≥2 个交易日就标黄，让人一眼看出这不是当天的判断。
+ */
+const klineBadge = (item: StrategySignalItem, tr: Translate) => {
+  const asof = (item.kline_asof || '').trim()
+  if (!asof) {
+    return {
+      text: tr('opportunities.klineMissing'),
+      tip: tr('opportunities.klineMissingTip'),
+      warn: true,
+    }
+  }
+  const behind = tradingDaysBehind(asof, item.snapshot_date)
+  const stale = behind != null && behind >= 2
+  return {
+    text: tr('opportunities.klineTag', { date: asof.slice(5) }),
+    tip: stale ? tr('opportunities.klineStaleTip', { date: asof, days: behind }) : asof,
+    warn: stale,
+  }
 }
 
 const itemTimestamp = (item: StrategySignalItem) => {
@@ -688,6 +727,7 @@ export default function OpportunitiesPage() {
       <div data-tour="opportunity-signals" className="grid min-h-12 grid-cols-1 md:grid-cols-2 gap-3">
         {groupedItems.map((group) => {
           const item = group.primary
+          const kline = klineBadge(item, oppT)
           const payload = item.payload && typeof item.payload === 'object' ? item.payload as Record<string, unknown> : {}
           const sourceMeta = payload.source_meta && typeof payload.source_meta === 'object' ? payload.source_meta as Record<string, unknown> : {}
           const sourcePlan = sourceMeta.plan && typeof sourceMeta.plan === 'object' ? sourceMeta.plan as Record<string, unknown> : {}
@@ -720,7 +760,15 @@ export default function OpportunitiesPage() {
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-[15px] font-semibold truncate">{item.stock_name || item.stock_symbol}</div>
-                    <div className="text-[11px] text-muted-foreground font-mono">{item.stock_market}:{item.stock_symbol}</div>
+                    <div className="text-[11px] text-muted-foreground font-mono flex items-center gap-1.5">
+                      <span>{item.stock_market}:{item.stock_symbol}</span>
+                      <span
+                        className={`inline-flex items-center rounded border px-1 py-px text-[10px] font-sans ${kline.warn ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'border-border/50 text-muted-foreground/80'}`}
+                        title={kline.tip}
+                      >
+                        {kline.text}
+                      </span>
+                    </div>
                   </div>
                   <div className="text-right">
                     <div className="text-[12px]">
@@ -795,6 +843,7 @@ export default function OpportunitiesPage() {
                   {oppT('opportunities.source')}: {sourceFlags.join(' + ')}
                 </div>
                 <div className="flex items-center gap-3">
+                  <ThsLink symbol={item.stock_symbol} market={item.stock_market} name={item.stock_name || undefined} />
                   <button
                     type="button"
                     onClick={() => setShareSignal(item)}
