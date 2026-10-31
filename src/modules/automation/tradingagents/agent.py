@@ -24,6 +24,7 @@ from src.modules.automation.tradingagents.runtime_support import (
     VALID_ANALYSTS,
     apply_compat_patches,
     build_ta_llm_config,
+    configure_yfinance_proxy,
     inject_api_key_env,
 )
 from src.modules.automation.tradingagents.data_context import (
@@ -554,6 +555,9 @@ class TradingAgentsAgent(BaseAgent):
         # tool_calls.args 字符串被自动转 dict。
         apply_compat_patches()
         inject_api_key_env(ai_client)
+        # yfinance 只认环境变量、不读系统代理，而 watchdog.ps1 又把 proxy 环境变量清空了；
+        # 不显式挂代理，Yahoo 会以 403 拒绝并伪装成 YFRateLimitError。
+        configure_yfinance_proxy()
 
         # patch + 数据上下文,确保 TradingAgents 调 route_to_vendor 时拿到 PanWatch 数据
         trace_id_for_ctx = getattr(progress_handler, "trace_id", "") if progress_handler else ""

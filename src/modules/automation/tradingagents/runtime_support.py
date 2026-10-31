@@ -24,7 +24,9 @@ __all__ = [
     "VALID_ANALYSTS",
     "apply_compat_patches",
     "build_ta_llm_config",
+    "configure_yfinance_proxy",
     "inject_api_key_env",
+    "resolve_yfinance_proxy",
 ]
 
 
@@ -164,6 +166,127 @@ def inject_api_key_env(ai_client: AIClient) -> None:
     os.environ["OPENROUTER_API_KEY"] = ai_client.api_key
     os.environ["OPENAI_API_KEY"] = ai_client.api_key
     os.environ["DEEPSEEK_API_KEY"] = ai_client.api_key
+
+
+# ============================================================================
+# yfinance 代理
+#
+# 为什么必须显式设：
+#   1. yfinance 底层是 requests，requests 只认 HTTP(S)_PROXY 环境变量，
+#      **不读 Windows 系统代理注册表**；
+#   2. watchdog.ps1 启动时又主动清空了所有 proxy 环境变量（为的是让东财 /
+#      腾讯 / 新浪 / baostock 这些国内源直连，绕代理才不会超时）；
+#   3. 于是 yfinance 在"无代理"状态下直连 Yahoo，被反爬拒绝（HTTP 403），
+#      yfinance 把 403 包装成 YFRateLimitError，日志显示"限流"，实际是硬拒绝。
+#
+# 所以这里只给 yfinance 单独挂代理，不动进程级环境变量，
+# 避免把国内数据源一起绕到海外节点上去。
+# ============================================================================
+
+_YF_PROXY_CONFIGURED = False
+
+
+def _windows_system_proxy() -> str | None:
+    """读 Windows 系统代理（HKCU Internet Settings）。未启用/非 Windows 返回 None。"""
+    if os.name != "nt":
+        return None
+    try:
+        import winreg
+    except ImportError:  # pragma: no cover - 非 Windows 平台
+        return None
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+        )
+    except OSError:
+        return None
+    try:
+        try:
+            enabled, _ = winreg.QueryValueEx(key, "ProxyEnable")
+            server, _ = winreg.QueryValueEx(key, "ProxyServer")
+        except OSError:
+            return None
+    finally:
+        winreg.CloseKey(key)
+
+    if not enabled or not server:
+        return None
+    server = str(server).strip()
+    if not server:
+        return None
+    # ProxyServer 可能是 "host:port"，也可能是 "http=h:p;https=h:p"
+    if "=" in server:
+        parts = dict(item.split("=", 1) for item in server.split(";") if "=" in item)
+        server = (parts.get("https") or parts.get("http") or "").strip()
+        if not server:
+            return None
+    if not server.lower().startswith(("http://", "https://")):
+        server = "http://" + server
+    return server
+
+
+def resolve_yfinance_proxy() -> str | None:
+    """决定 yfinance 走哪个代理。
+
+    优先级：PANWATCH_YF_PROXY / TRADINGAGENTS_YF_PROXY 显式覆盖 > 系统代理 > 无。
+    显式值写 none/off/0/disable 表示强制直连（调试用）。
+    """
+    explicit = (
+        os.environ.get("PANWATCH_YF_PROXY")
+        or os.environ.get("TRADINGAGENTS_YF_PROXY")
+        or ""
+    ).strip()
+    if explicit:
+        if explicit.lower() in {"0", "none", "off", "false", "disable"}:
+            return None
+        return explicit
+    return _windows_system_proxy()
+
+
+def configure_yfinance_proxy() -> str | None:
+    """把代理挂到 yfinance 全局 config 上（幂等）。返回生效的代理地址或 None。
+
+    yfinance ≥ 0.2.51 提供 set_config(proxy=...)，它作用于之后所有
+    yf.Ticker / yf.download / yf.Search 调用，且不污染 os.environ。
+    失败一律降级为"不设代理"，让分析继续跑，只是会被 Yahoo 403。
+    """
+    global _YF_PROXY_CONFIGURED
+
+    proxy = resolve_yfinance_proxy()
+    if proxy is None:
+        logger.warning(
+            "[TA proxy] 未找到可用代理（PANWATCH_YF_PROXY 为空且系统代理未启用），"
+            "yfinance 将直连 Yahoo，本机大概率被拒（403 → YFRateLimitError）"
+        )
+        return None
+    if _YF_PROXY_CONFIGURED:
+        return proxy
+    try:
+        import yfinance as yf
+    except ImportError:
+        return None
+
+    # yfinance ≥ 1.7 走新的 ConfigMgr 接口（yf.set_config 已标记 deprecated）；
+    # 老版本回退到 set_config()。
+    try:
+        yf.config.network.proxy = proxy
+    except Exception as new_api_error:  # noqa: BLE001
+        setter = getattr(yf, "set_config", None)
+        if setter is None:
+            logger.warning(
+                "[TA proxy] 当前 yfinance 版本既无 yf.config.network 也无 set_config()，"
+                f"无法挂代理（{new_api_error}）；若日志出现 YFRateLimitError 请升级 yfinance"
+            )
+            return None
+        try:
+            setter(proxy=proxy)
+        except Exception as e:  # noqa: BLE001 - 代理是增强项，失败不该阻断分析
+            logger.warning(f"[TA proxy] 设置 yfinance 代理失败: {e}")
+            return None
+    _YF_PROXY_CONFIGURED = True
+    logger.info(f"[TA proxy] yfinance 已挂代理 {proxy}")
+    return proxy
 
 
 # ============================================================================
