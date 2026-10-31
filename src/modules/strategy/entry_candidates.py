@@ -30,6 +30,11 @@ from src.platform.persistence.models import (
 logger = logging.getLogger(__name__)
 
 
+# 候选池 meta 里记录指标自身的交易日与真正采集日：只有这两个字段才能证明
+# 「这条 K 线是新的」，光看 snapshot_date 会被历史补全的抄写行为骗过。
+KLINE_ASOF_FIELD = "kline_asof"
+KLINE_FETCHED_FIELD = "kline_fetched_on"
+
 ACTION_BASE_SCORE: dict[str, float] = {
     "buy": 78.0,
     "add": 72.0,
@@ -321,16 +326,66 @@ def _load_quote_fallbacks(
     return fallback
 
 
+def _kline_origin_day(row, siblings: list) -> date | None:
+    """这一份 K 线是「哪一天真正采集的」。
+
+    `source_meta.fallback_candidate_id` 不能当链条用：它是补全时被选中的那一条，
+    实测会跨 symbol（601127 的引用指向 688775），顺着走会在半路断掉并把日期判成
+    「昨天」。这里改用两个可靠依据：
+
+    1. 新数据直接读 `kline_fetched_on`（写入时记下真实采集日）；
+    2. 旧数据按 K 线内容指纹找「同一 symbol 下完全相同的最早一行」——历史补全是把
+       meta.kline 原样抄下去的，所以指纹相同意味着同一份数据，最早那天才是采集日。
+    """
+    meta = row.meta if isinstance(row.meta, dict) else {}
+    own = _parse_day(meta.get(KLINE_FETCHED_FIELD))
+    if own:
+        return own
+    explicit: list[date] = []
+    for other in siblings:
+        other_meta = other.meta if isinstance(other.meta, dict) else {}
+        day = _parse_day(other_meta.get(KLINE_FETCHED_FIELD))
+        if day:
+            explicit.append(day)
+    if explicit:
+        return min(explicit)
+
+    target = _extract_kline_from_meta(meta)
+    if not target:
+        return None
+    origin: date | None = None
+    for other in siblings:
+        other_meta = other.meta if isinstance(other.meta, dict) else {}
+        if _extract_kline_from_meta(other_meta) != target:
+            continue
+        day = _parse_day(other.snapshot_date)
+        if day and (origin is None or day < origin):
+            origin = day
+    return origin or _parse_day(row.snapshot_date)
+
+
 def _load_kline_fallbacks(
-    keys: set[str], *, lookback_days: int = 7, max_rows: int = 6000
+    keys: set[str], *, snapshot: str = "", lookback_days: int = 7, max_rows: int = 12000
 ) -> dict[str, dict]:
+    """复用最近几天算过的 K 线摘要，但**新鲜度以真正采集日为起点**。
+
+    老实现只按 `snapshot_date` 回溯 7 天：历史补全把上一份 kline 抄进当天新行，
+    明天再回溯又命中「昨天」（其实是同一份），窗口永远不会到期，指标可以一路冻住
+    —— 实测 601127 的「多头排列 / 金叉 / 量比 0.5439…」从 10-19 挂到 10-27 一字未改，
+    而当天真实指标已是空头排列 / 死叉。
+
+    返回值每条带 `asof`（指标所属交易日）与 `fetched_on`（真正采集日），调用方据此
+    决定要不要信旧候选的 action，以及把哪只票优先送去实时重取。
+    """
     if not keys:
         return {}
     symbols = sorted({k.split(":", 1)[1] for k in keys if ":" in k})
     if not symbols:
         return {}
 
-    cutoff_day = (date.today() - timedelta(days=max(1, int(lookback_days)))).strftime("%Y-%m-%d")
+    snapshot_day = _parse_day(snapshot) or date.today()
+    # 追溯来源需要看到窗口之外的旧行，所以 SQL 放宽到 30 天，真正的窗口判定按 origin 做。
+    trace_cutoff = (snapshot_day - timedelta(days=30)).strftime("%Y-%m-%d")
     cutoff_time = utc_now() - timedelta(days=max(1, int(lookback_days)))
     fallback: dict[str, dict] = {}
 
@@ -340,20 +395,37 @@ def _load_kline_fallbacks(
             db.query(EntryCandidate)
             .filter(
                 EntryCandidate.stock_symbol.in_(symbols),
-                EntryCandidate.snapshot_date >= cutoff_day,
+                EntryCandidate.snapshot_date >= trace_cutoff,
             )
             .order_by(EntryCandidate.snapshot_date.desc(), EntryCandidate.updated_at.desc())
             .limit(max_rows)
             .all()
         )
+        rows_by_key: dict[str, list] = {}
+        for row in rows:
+            key = f"{_to_market(row.stock_market).value}:{row.stock_symbol}"
+            if key not in keys:
+                continue
+            rows_by_key.setdefault(key, []).append(row)
         for row in rows:
             key = f"{_to_market(row.stock_market).value}:{row.stock_symbol}"
             if key not in keys or key in fallback:
                 continue
-            kline = _extract_kline_from_meta(row.meta if isinstance(row.meta, dict) else {})
+            if str(row.snapshot_date or "") > snapshot:
+                continue
+            meta = row.meta if isinstance(row.meta, dict) else {}
+            kline = _extract_kline_from_meta(meta)
             if not kline:
                 continue
-            fallback[key] = kline
+            origin = _kline_origin_day(row, rows_by_key.get(key) or [])
+            if origin is None or (snapshot_day - origin).days > int(lookback_days):
+                continue
+            asof = _parse_day(meta.get(KLINE_ASOF_FIELD)) or origin
+            fallback[key] = {
+                "kline": kline,
+                "asof": asof.strftime("%Y-%m-%d"),
+                "fetched_on": origin.strftime("%Y-%m-%d"),
+            }
             if len(fallback) >= len(keys):
                 return fallback
 
@@ -372,16 +444,64 @@ def _load_kline_fallbacks(
             key = f"{_to_market(row.stock_market).value}:{row.stock_symbol}"
             if key not in keys or key in fallback:
                 continue
-            kline = _extract_kline_from_meta(row.meta if isinstance(row.meta, dict) else {})
+            meta = row.meta if isinstance(row.meta, dict) else {}
+            kline = _extract_kline_from_meta(meta)
             if not kline:
                 continue
-            fallback[key] = kline
+            created = getattr(row, "created_at", None)
+            created_day = created.date() if hasattr(created, "date") else None
+            asof = _parse_day(meta.get(KLINE_ASOF_FIELD)) or created_day
+            if asof is None:
+                continue
+            fallback[key] = {
+                "kline": kline,
+                "asof": asof.strftime("%Y-%m-%d"),
+                "fetched_on": (created_day or asof).strftime("%Y-%m-%d"),
+            }
             if len(fallback) >= len(keys):
                 break
     finally:
         db.close()
 
     return fallback
+
+
+def _resolve_seeded_decision(
+    *,
+    seeded_action: str | None,
+    seeded_label: str | None,
+    seeded_signal: str | None,
+    seeded_reason: str | None,
+    seeded_tags: list | None,
+    decision: dict,
+    kline_is_today: bool,
+) -> dict:
+    """旧候选的 action 只有在「它依据的就是本轮这份当日 K 线」时才允许沿用。
+
+    候选池历史上会给缺实时 K 线的票沿用几天前的记录；若再让那份记录里的 action
+    覆盖本轮算出的决策，一个 8 天前的「建仓」就会一直续命到指标反转之后 —— 机会页
+    显示买入、详情页显示观望，就是这么来的。
+    """
+    seeded = (seeded_action or "").strip().lower()
+    if seeded in ACTION_BASE_SCORE and kline_is_today:
+        return {
+            "action": seeded,
+            "action_label": (seeded_label or decision.get("action_label") or "观望").strip(),
+            "signal": (seeded_signal or decision.get("signal") or "").strip(),
+            "reason": (seeded_reason or decision.get("reason") or "").strip(),
+            "strategy_tags": list(
+                dict.fromkeys(
+                    [x for x in (seeded_tags or decision.get("strategy_tags") or []) if x]
+                )
+            ),
+        }
+    return {
+        "action": decision["action"],
+        "action_label": decision["action_label"],
+        "signal": decision["signal"],
+        "reason": decision["reason"],
+        "strategy_tags": list(decision.get("strategy_tags") or []),
+    }
 
 
 def _score_suggestion(
@@ -1354,29 +1474,44 @@ def refresh_entry_candidates(
             if _safe_float(seed_quote.get("current_price")) is not None:
                 quotes[key] = dict(seed_quote)
 
+    snapshot_day = _parse_day(snapshot) or date.today()
     kline_summary_map: dict[str, dict] = _load_kline_fallbacks(
         key_set,
+        snapshot=snapshot,
         lookback_days=7,
-        max_rows=8000,
+        max_rows=12000,
     )
     fetch_candidates = [k for k in key_set if k not in kline_summary_map]
     if fetch_candidates:
         safe_cap = max(0, int(max_kline_symbols))
-        fetch_candidates.sort(
-            key=lambda k: (
-                0 if input_map.get(k, {}).get("source_suggestion_id") else 1,
-                _candidate_sort_key(input_map.get(k) or {}),
-                k,
-            )
-        )
+
+        def _refresh_priority(key: str) -> tuple:
+            # 抓数预算有限（max_kline_symbols）：完全没有缓存的排最前，其余按指标已滞后
+            # 天数从大到小排。不按滞后排序时，排名靠前的票天天重取、靠后的票永远轮不到。
+            cached = kline_summary_map.get(key) or {}
+            asof = _parse_day(cached.get("asof"))
+            if asof is None:
+                return (0, 0, _candidate_sort_key(input_map.get(key) or {}), key)
+            return (1, -max(0, (snapshot_day - asof).days), _candidate_sort_key(input_map.get(key) or {}), key)
+
+        fetch_candidates.sort(key=_refresh_priority)
         if safe_cap > 0:
             fetch_candidates = fetch_candidates[:safe_cap]
         for key in fetch_candidates:
             market, symbol = key.split(":", 1)
             try:
-                kline_summary_map[key] = KlineCollector(_to_market(market)).get_kline_summary(symbol)
+                summary = KlineCollector(_to_market(market)).get_kline_summary(symbol)
             except Exception:
+                summary = {}
+            if not isinstance(summary, dict) or summary.get("error"):
                 kline_summary_map[key] = {}
+                continue
+            asof = _parse_day(summary.get("asof")) or snapshot_day
+            kline_summary_map[key] = {
+                "kline": summary,
+                "asof": asof.strftime("%Y-%m-%d"),
+                "fetched_on": snapshot,
+            }
     for key in key_set:
         if key not in kline_summary_map:
             kline_summary_map[key] = {}
@@ -1400,7 +1535,13 @@ def refresh_entry_candidates(
                         if v is not None and quote.get(k) is None
                     }
                 )
-            kline = kline_summary_map.get(key, {}) or {}
+            kline_entry = kline_summary_map.get(key) or {}
+            kline = kline_entry.get("kline") or {}
+            kline_asof = str(kline_entry.get("asof") or "")
+            kline_fetched_on = str(kline_entry.get("fetched_on") or "")
+            # 只有「指标就是本轮这份快照当天算的」才允许沿用旧候选的动作与计划；
+            # 滞后一天的 K 线可以继续用于打分，但不能拿它去背书一个更早的结论。
+            kline_is_today = bool(kline_asof) and kline_asof[:10] == snapshot[:10]
             candidate_source = (inp.get("candidate_source") or "watchlist").strip()
             is_holding = key in holding_keys
 
@@ -1424,32 +1565,21 @@ def refresh_entry_candidates(
                 if (_safe_float(kline.get("volume_ratio")) or 0) >= 1.8:
                     strategy_tags.append("volume_breakout")
             else:
-                seeded_action = (inp.get("action") or "").strip().lower()
                 decision = _derive_market_scan_decision(quote=quote, kline=kline)
-                if seeded_action in ACTION_BASE_SCORE:
-                    action = seeded_action
-                    action_label = (inp.get("action_label") or decision.get("action_label") or "观望").strip()
-                    signal = (inp.get("signal") or decision.get("signal") or "").strip()
-                    reason = (inp.get("reason") or decision.get("reason") or "").strip()
-                    strategy_tags = list(
-                        dict.fromkeys(
-                            [
-                                x
-                                for x in (
-                                    inp.get("strategy_tags_seed")
-                                    or decision.get("strategy_tags")
-                                    or []
-                                )
-                                if x
-                            ]
-                        )
-                    )
-                else:
-                    action = decision["action"]
-                    action_label = decision["action_label"]
-                    signal = decision["signal"]
-                    reason = decision["reason"]
-                    strategy_tags = list(decision.get("strategy_tags") or [])
+                resolved = _resolve_seeded_decision(
+                    seeded_action=inp.get("action"),
+                    seeded_label=inp.get("action_label"),
+                    seeded_signal=inp.get("signal"),
+                    seeded_reason=inp.get("reason"),
+                    seeded_tags=inp.get("strategy_tags_seed"),
+                    decision=decision,
+                    kline_is_today=kline_is_today,
+                )
+                action = resolved["action"]
+                action_label = resolved["action_label"]
+                signal = resolved["signal"]
+                reason = resolved["reason"]
+                strategy_tags = resolved["strategy_tags"]
                 score, evidence = _score_market_scan_candidate(
                     action=action,
                     quote=quote,
@@ -1472,7 +1602,8 @@ def refresh_entry_candidates(
                 suggestion_meta=(inp.get("meta") or {}),
             )
             seed_plan = inp.get("plan_seed") if isinstance(inp.get("plan_seed"), dict) else {}
-            if seed_plan and _plan_quality(plan) < 90:
+            # 旧计划里的价位同样是按当时的价格算的，指标不新鲜就不要再合并进来。
+            if seed_plan and kline_is_today and _plan_quality(plan) < 90:
                 merged = dict(seed_plan)
                 for k, v in (plan or {}).items():
                     if v is None:
@@ -1530,6 +1661,8 @@ def refresh_entry_candidates(
                         },
                         "strategy_tags": strategy_tags,
                         "is_holding_snapshot": bool(is_holding),
+                        KLINE_ASOF_FIELD: kline_asof,
+                        KLINE_FETCHED_FIELD: kline_fetched_on,
                         "source_meta": inp.get("meta") or {},
                     }
                 ),

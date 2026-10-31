@@ -107,6 +107,9 @@ def _compact_signal_payload(payload: dict | None) -> dict:
         "news_metric": raw.get("news_metric") if isinstance(raw.get("news_metric"), dict) else {},
         "constrained": bool(raw.get("constrained")),
         "constraint_reasons": raw.get("constraint_reasons") if isinstance(raw.get("constraint_reasons"), list) else [],
+        # 这条信号的技术指标基于哪一天的日线：前端据此标「K线 10-23」，避免拿旧数据当当天判断
+        "kline_asof": str(raw.get("kline_asof") or ""),
+        "kline_fetched_on": str(raw.get("kline_fetched_on") or ""),
     }
     return to_jsonable(compact)
 
@@ -1075,6 +1078,9 @@ def _format_signal(
 ) -> dict:
     payload_raw = row.payload if isinstance(row.payload, dict) else {}
     payload = _compact_signal_payload(payload_raw) if include_payload else {}
+    # 直接从落库 payload 读，include_payload=False 的轻量列表也要能拿到（否则机会页标不出新鲜度）
+    kline_asof = str(payload_raw.get("kline_asof") or "")
+    kline_fetched_on = str(payload_raw.get("kline_fetched_on") or "")
 
     if include_payload:
         score_breakdown = (
@@ -1153,6 +1159,8 @@ def _format_signal(
     return {
         "id": row.id,
         "snapshot_date": row.snapshot_date,
+        "kline_asof": kline_asof,
+        "kline_fetched_on": kline_fetched_on,
         "stock_symbol": row.stock_symbol,
         "stock_market": row.stock_market,
         "stock_name": row.stock_name,
@@ -1334,6 +1342,8 @@ def refresh_strategy_signals(
                 payload = {
                     "entry_candidate_id": c.id,
                     "entry_candidate_snapshot": c.snapshot_date,
+                    "kline_asof": str(cmeta.get("kline_asof") or ""),
+                    "kline_fetched_on": str(cmeta.get("kline_fetched_on") or ""),
                     "strategy_tags": c.strategy_tags or [],
                     "strategy_weight": weight,
                     "source_meta": compact_source_meta,

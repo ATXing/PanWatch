@@ -82,6 +82,10 @@ export interface StrategyCatalogItem {
 export interface StrategySignalItem {
   id: number
   snapshot_date: string
+  /** 这条信号的技术指标基于哪一天的日线（YYYY-MM-DD），空串表示无 K 线 */
+  kline_asof?: string
+  /** 该 K 线的采集日期（YYYY-MM-DD） */
+  kline_fetched_on?: string
   stock_symbol: string
   stock_market: string
   stock_name: string
