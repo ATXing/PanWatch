@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from pan_investment_research import (
-    Evidence, InvestmentResearch, ModelReply, ResearchInput, ResearchPolicy, Security,
+    Evidence, InvestmentResearch, ModelReply, ResearchInput, ResearchPolicy, ResearchSignal, Security,
 )
 from pan_investment_research.budget import Budget, BudgetExceeded
 
@@ -121,6 +121,52 @@ def test_complete_nine_role_research_and_separate_usage():
     assert result.usage["attempts"] == 9
     assert result.usage["input_tokens"] == 90
     assert set(model.calls) == {"technical", "flow", "events", "bull", "bear", "manager", "strategy", "risk", "decision"}
+
+
+def test_grouped_run_keeps_signals_inside_their_own_batch():
+    # 10 只 > max_group_size(8)，信号只落在第二组。分组若只切 securities/evidence 而漏切 signals，
+    # 第一组在 expert 节点就抛 "signal outside research scope or analysis cutoff"，0 次模型调用即全盘失败。
+    keys = tuple(f"CN:6000{i:02d}" for i in range(10))
+    data = prepared(keys)
+    data.signals = [ResearchSignal(stock_key=keys[-1], domain="events",
+                                   reasons=["material_captured_event"], observed_at=data.as_of, material=True)]
+    # 两组各跑一遍全payload，先放大 token 预算，避免用例被预算而非作用域判死
+    result = run(data=data, policy=ResearchPolicy(max_total_tokens=1000000))
+    assert result.status == "ready", result.reason
+    assert len(result.recommendations) == len(keys)
+
+
+def test_truncated_reply_is_compressed_once_instead_of_voiding_the_run():
+    # 8-10 只票时模型偶发写到 max_output_tokens 截断。截断的 JSON 不可用，
+    # 但一次冗长回复不该让整轮研究作废：压缩重试一次即可继续。
+    class Truncating(Model):
+        async def complete(self, *, role, before_attempt, **kwargs):
+            if role == "manager" and self.calls["manager"] == 0:
+                await before_attempt()
+                self.calls["manager"] += 1
+                return ModelReply('{"summary": "cut off', "script", usage={"input_tokens": 10, "output_tokens": 5},
+                                  finish_reason="length")
+            return await super().complete(role=role, before_attempt=before_attempt, **kwargs)
+
+    model = Truncating()
+    result = run(model)
+    assert result.status == "ready", result.reason
+    assert model.calls["manager"] == 2
+
+
+def test_repeated_truncation_fails_loudly_rather_than_publishing_partial_json():
+    class AlwaysTruncating(Model):
+        async def complete(self, *, role, before_attempt, **kwargs):
+            if role == "manager":
+                await before_attempt()
+                self.calls["manager"] += 1
+                return ModelReply('{"summary": "cut off', "script", finish_reason="length")
+            return await super().complete(role=role, before_attempt=before_attempt, **kwargs)
+
+    result = run(AlwaysTruncating())
+    assert result.status == "review"
+    assert result.completion == "budget_exhausted"
+    assert "after compression" in result.reason
 
 
 def test_tool_loop_waits_for_terminal_expert_before_manager():
@@ -282,15 +328,17 @@ def test_light_intraday_profile_keeps_strategy_risk_and_decision():
     assert set(model.calls) == {"technical", "manager", "strategy", "risk", "decision"}
 
 
-def test_output_truncation_is_budget_review_without_wasting_format_repair():
+def test_output_truncation_gets_one_compression_retry_then_budget_review():
+    # 截断不是 JSON 格式问题，所以不走共享的格式修复；但也不能让一次冗长回复作废整轮研究，
+    # 因此每次模型调用有一次「压缩重写」额度，再截断就按预算耗尽收尾。
     class Truncated(Model):
         async def complete(self, *, before_attempt, **kwargs):
             await before_attempt()
             return ModelReply("", "script", usage={"output_tokens": 4096}, finish_reason="length")
     result = run(Truncated(), policy=ResearchPolicy(specialists=["technical"], debate=False))
     assert result.status == "review"
-    assert result.usage["attempts"] == 1
-    assert result.usage["output_tokens"] == 4096
+    assert result.usage["attempts"] == 2
+    assert result.usage["output_tokens"] == 8192
     assert "output exhausted" in result.reason
 
 

@@ -14,6 +14,7 @@ from src.modules.automation.base import AnalysisResult
 from src.modules.research.signals.actions import normalize_suggestion
 from src.platform.observability.log_context import get_log_context
 from . import repository
+from .breaker import BREAKER, fingerprint
 from .evidence import prepare
 from .reporting import build_report
 from .gateway import EvidenceTools, ResearchModelGateway
@@ -28,12 +29,24 @@ def scope_policy(policy, config, targets):
     groups = (targets + policy.max_group_size - 1) // policy.max_group_size
     updates = {}
     if "max_attempts" not in config:
-        updates["max_attempts"] = min(100, policy.max_attempts + 6 * (groups - 1))
+        # Each group spends specialists x (1 + tool rounds) + manager calls, and every role may
+        # repair or compress once; a flat allowance runs out mid-plan on larger watchlists.
+        per_group = len(policy.specialists) * (1 + policy.max_tool_rounds) + 1
+        updates["max_attempts"] = min(100, policy.max_attempts + (per_group + 6) * (groups - 1))
     defaults = {
         "max_tools": min(30, policy.max_tools * groups),
-        "max_total_tokens": min(1000000, policy.max_total_tokens * targets),
+        # Reservation is a byte-based upper bound (~3x real tokens), so the ceiling must leave room
+        # for grouped runs of ~18 targets; per-run attempts are still capped separately.
+        # The configured model reasons before answering and both parts share max_tokens, so the
+        # output allowance must cover chain-of-thought plus the report; 8k truncated an 18-target
+        # strategy reply mid-JSON. Actual usage stays far below the cap.
+        "max_total_tokens": min(8000000, policy.max_total_tokens * targets),
         "max_input_chars": min(250000, policy.max_input_chars + 12000 * (targets - 1)),
-        "max_output_tokens": min(8000, policy.max_output_tokens + 768 * (targets - 1)),
+        "max_output_tokens": min(32000, policy.max_output_tokens + 1536 * (targets - 1)),
+        # Groups widen the model round rather than the per-call cost: an 18-target premarket run
+        # spends ~30 reasoning calls (10-16s each) and needs ~8 minutes, so a fixed 90s deadline
+        # fails on wall clock alone. Single-group runs keep the preset value unchanged.
+        "deadline_seconds": min(600, policy.deadline_seconds * (1 + 3 * (groups - 1))),
     }
     updates.update({key: value for key, value in defaults.items() if key not in config})
     return ResearchPolicy.model_validate({**policy.model_dump(), **updates})
@@ -53,6 +66,25 @@ async def execute(agent, context, config):
     scope = hashlib.sha256(json.dumps(keys).encode()).hexdigest()
     trace = getattr(context, "_trace_id", None) or get_log_context().get("trace_id") or str(uuid.uuid4())
     run_id = hashlib.sha256(f"{trace}/{agent.name}/{scope}/{mode}".encode()).hexdigest()
+    # Refuse an identical repeat before a run row exists or a single token is spent.
+    # Editing the agent config changes the fingerprint, so a real fix always gets through.
+    gate = fingerprint(policy.model_dump(mode="json"))
+    trip = BREAKER.check(agent.name, scope, gate)
+    if trip is not None:
+        logger.warning(
+            "[熔断] %s 连续 %s 轮未完成（%s），本轮跳过；%s 秒后或修改配置后自动恢复",
+            agent.name,
+            trip["failures"],
+            " / ".join(trip["completions"]),
+            trip["retry_after_seconds"],
+        )
+        return AnalysisResult(
+            agent.name,
+            agent.display_name,
+            f"已连续 {trip['failures']} 轮未完成（{' / '.join(trip['completions'])}），"
+            f"已暂停重试 {max(1, trip['retry_after_seconds'] // 60)} 分钟；修改该任务的配置后会立即恢复。",
+            raw_data={"skipped": True, "breaker": trip},
+        )
     prior = await repository.start(run_id, trace, agent.name, scope, mode)
     if prior is not None:
         if prior.get("busy"):
@@ -79,6 +111,7 @@ async def execute(agent, context, config):
         research = await InvestmentResearch().run(prepared, model=ResearchModelGateway(context.ai_client),
             tools=EvidenceTools(details), events=Events(run_id), policy=policy)
         result = present(agent, context, prepared, research, elapsed_seconds=time.monotonic() - started)
+        BREAKER.record(agent.name, scope, gate, research.completion)
         agent.localize_result_title(result, context)
         targets = context.notifier.delivery_targets() if hasattr(context.notifier, "delivery_targets") else [("configured", context.notifier)]
         notify = research.completion != "skipped" and not getattr(context, "suppress_notify", False)
@@ -116,6 +149,7 @@ async def execute(agent, context, config):
         await asyncio.shield(repository.fail(run_id, "cancelled"))
         raise
     except Exception as exc:
+        BREAKER.record(agent.name, scope, gate, "failed")
         await repository.fail(run_id, type(exc).__name__)
         raise
 

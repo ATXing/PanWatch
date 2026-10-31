@@ -22,11 +22,7 @@ def build_fast_graph(engine, state_schema, context_schema):
             f"{len(keys)}只股票出现新变化，仅运行对应专家。" if keys else "未发现实质变化，未调用模型，也不生成占位操作建议。")
         result = engine._store(state, "gate", RoleReport(summary=summary), "", deps, kind="rule")
         await deps.emit("gate", "done" if keys else "skipped", securities=len(keys))
-        prepared = deps.prepared.model_copy(update={
-            "securities": [s for s in deps.prepared.securities if s.key in keys],
-            "evidence": [e for e in deps.prepared.evidence if e.stock_key in keys | {"*"}],
-            "signals": signals,
-        })
+        prepared = deps.prepared.scoped(keys).model_copy(update={"signals": signals})
         return {**result, "skipped": not keys, "prepared": prepared.model_dump(mode="json")}
 
     def dispatch(state):
@@ -44,9 +40,7 @@ def build_fast_graph(engine, state_schema, context_schema):
                 if not stocks:
                     continue
                 keys = {s.key for s in stocks}
-                scoped = prepared.model_copy(update={"securities": stocks,
-                    "evidence": [e for e in prepared.evidence if e.stock_key in keys | {"*"}],
-                    "signals": [s for s in prepared.signals if s.stock_key in keys]})
+                scoped = prepared.scoped(keys)
                 jobs.append(Send("expert", {"prepared": scoped.model_dump(mode="json"),
                     "group": str(index // size), "role": role, "epoch": 0, "messages": [], "rounds": 0}))
         return jobs

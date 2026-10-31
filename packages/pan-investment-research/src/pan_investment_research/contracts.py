@@ -50,6 +50,20 @@ class ResearchInput(Contract):
     portfolio: dict[str, Any] = Field(default_factory=dict)
     signals: list[ResearchSignal] = Field(default_factory=list)
 
+    def scoped(self, keys) -> "ResearchInput":
+        """Narrow to one batch of securities.
+
+        Securities, evidence and signals must be cut together: the scope validator rejects any
+        signal or evidence row pointing outside the batch, so slicing two of the three silently
+        turns every grouped run into a validation failure before the first model call.
+        """
+        keep = set(keys)
+        return self.model_copy(update={
+            "securities": [s for s in self.securities if s.key in keep],
+            "evidence": [e for e in self.evidence if e.stock_key in keep or e.stock_key == "*"],
+            "signals": [s for s in self.signals if s.stock_key in keep],
+        })
+
     @model_validator(mode="after")
     def validate_scope(self):
         keys = [s.key for s in self.securities]
@@ -159,9 +173,9 @@ class ResearchPolicy(Contract):
     max_tool_rounds: int = Field(default=1, ge=0, le=2)
     concurrency: int = Field(default=3, ge=1, le=6)
     deadline_seconds: float = Field(default=180, gt=0, le=600)
-    max_output_tokens: int = Field(default=4096, ge=128, le=8000)
+    max_output_tokens: int = Field(default=4096, ge=128, le=32000)
     max_input_chars: int = Field(default=60000, ge=1000, le=250000)
-    max_total_tokens: int = Field(default=250000, ge=1000, le=1000000)
+    max_total_tokens: int = Field(default=250000, ge=1000, le=8000000)
     max_group_size: int = Field(default=8, ge=1, le=30)
 
     @model_validator(mode="after")

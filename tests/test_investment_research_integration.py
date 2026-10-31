@@ -377,7 +377,9 @@ def test_multi_target_default_capacities_preserve_explicit_global_limits():
     _, explicit = service.validate_config(caps, "daily_report")
     scoped = service.scope_policy(explicit, caps, 30)
     assert all(getattr(scoped, key) == value for key, value in caps.items())
-    assert service.scope_policy(default, {}, 30).max_total_tokens <= 1000000
+    # 预算是按调用次数 × (输入估算 + 输出上限) 的保守上界：18 只票分 3 组要 ~35 次调用，
+    # 实际用量约 65 万 token。上界随标的数放大，单轮调用次数另有 max_attempts 兜底。
+    assert service.scope_policy(default, {}, 30).max_total_tokens <= 8000000
 
 
 def test_notification_starts_with_the_same_actions_saved_in_the_report(host, monkeypatch):

@@ -90,7 +90,7 @@ class Dependencies:
     budget: Budget
     artifacts: dict = field(default_factory=dict)
     plan: list = field(default_factory=list)
-    repaired: bool = False
+    repaired: set = field(default_factory=set)  # 每个角色各自一次契约修复额度
 
     async def emit(self, role, status, **details):
         if self.events:
@@ -177,20 +177,38 @@ class InvestmentResearch:
 
         async def permit():
             nonlocal permitted
-            await deps.budget.attempt(reserve, len(json.dumps(messages, ensure_ascii=False).encode()) + deps.policy.max_output_tokens)
+            # UTF-8 bytes overstate model tokens (~3x on CJK JSON), so a byte-count reservation
+            # trips the run budget at roughly a third of the real allowance. Keep the estimate a
+            # conservative upper bound, not an inflated one.
+            estimate = len(json.dumps(messages, ensure_ascii=False).encode()) // 3 + deps.policy.max_output_tokens
+            await deps.budget.attempt(reserve, estimate)
             permitted = True
 
         await deps.emit(role, "running")
-        async with deps.budget.semaphore:
-            reply = await asyncio.wait_for(deps.model.complete(
-                role=role, messages=messages, tools=tools or [],
-                schema=schema, max_output_tokens=deps.policy.max_output_tokens,
-                timeout=deps.budget.remaining(), before_attempt=permit), deps.budget.remaining())
-        if not permitted:
-            raise RuntimeError("model adapter did not acquire an attempt permit")
-        deps.budget.record_usage(reply.usage)
-        if reply.finish_reason == "length":
-            raise BudgetExceeded("model output exhausted its token limit; increase the configured output budget")
+        compressed = False
+        while True:
+            async with deps.budget.semaphore:
+                reply = await asyncio.wait_for(deps.model.complete(
+                    role=role, messages=messages, tools=tools or [],
+                    schema=schema, max_output_tokens=deps.policy.max_output_tokens,
+                    timeout=deps.budget.remaining(), before_attempt=permit), deps.budget.remaining())
+            if not permitted:
+                raise RuntimeError("model adapter did not acquire an attempt permit")
+            deps.budget.record_usage(reply.usage)
+            if reply.finish_reason != "length":
+                break
+            # A verbose reply must not void the whole run; the truncated object is unusable, so
+            # ask for the same object once more, compressed, then give up loudly instead of
+            # publishing a partial report.
+            await deps.emit(role, "truncated", chars=len(reply.content or ""),
+                            limit=deps.policy.max_output_tokens)
+            if compressed:
+                raise BudgetExceeded("model output exhausted its token limit again after compression; raise max_output_tokens")
+            compressed = True
+            messages = messages + [{"role": "user", "content":
+                "Your previous reply was discarded: it exceeded the output length limit. Return the same JSON object again, much shorter. "
+                "Keep every required field and every target, but write at most one claim per target, one sentence per text field, "
+                "and a summary of at most two sentences. Do not quote or restate evidence content, and cite IDs only."}]
         await deps.emit(role, "done", model=reply.model, usage=deps.budget.snapshot())
         return reply, messages
 
@@ -244,9 +262,10 @@ class InvestmentResearch:
                     raise ValueError("final decision changed the approved plan")
                 return report, reply.model
             except ValueError as exc:
-                if attempt or deps.repaired:
+                if attempt or role in deps.repaired:
                     raise
-                deps.repaired = True
+                deps.repaired.add(role)
+                await deps.emit(role, "repair", reason=str(exc)[:300])
                 messages += [{"role": "assistant", "content": reply.content},
                              {"role": "user", "content": f"Repair this contract error without adding facts: {exc}"}]
                 reply, _ = await self._model(role, payload, deps, messages=messages)
@@ -328,9 +347,9 @@ class InvestmentResearch:
                     found = await asyncio.wait_for(deps.tools.execute(fn["name"], args,
                         stock_keys=[s.key for s in prepared.securities]), deps.budget.remaining())
                 except ValueError:
-                    if deps.repaired:
+                    if state["role"] in deps.repaired:
                         raise
-                    deps.repaired = True
+                    deps.repaired.add(state["role"])
                     messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps({
                         "error": "Invalid or out-of-scope detail request; no evidence retrieved. Use only the evidence already supplied, disclose missing details, and return the report without further tool calls."})})
                     await deps.emit(state["role"], "tool_rejected", tool=fn["name"])
@@ -358,9 +377,10 @@ class InvestmentResearch:
                 report = RoleReport.model_validate_json(reply.content)
                 self._validate(report, prepared, prepared.evidence, state["role"])
             except ValueError as exc:
-                if deps.repaired:
+                if state["role"] in deps.repaired:
                     raise
-                deps.repaired = True
+                deps.repaired.add(state["role"])
+                await deps.emit(state["role"], "repair", reason=str(exc)[:300])
                 messages = state["messages"] + [{"role": "assistant", "content": reply.content},
                     {"role": "user", "content": f"Repair the JSON contract without adding facts: {exc}"}]
                 reply, _ = await self._model(state["role"], {"input": market_input(prepared)}, deps, messages=messages)
@@ -475,8 +495,7 @@ class InvestmentResearch:
                 start = int(group) * deps.policy.max_group_size
                 stocks = deps.prepared.securities[start:start + deps.policy.max_group_size]
                 keys = {s.key for s in stocks}
-                prepared = deps.prepared.model_copy(update={"securities": stocks,
-                    "evidence": [e for e in deps.prepared.evidence if e.stock_key in keys or e.stock_key == "*"]})
+                prepared = deps.prepared.scoped(keys)
                 jobs.append(Send("research", {"prepared": prepared.model_dump(mode="json"), "group": group, "artifacts": {}}))
             return jobs
 
@@ -535,8 +554,7 @@ class InvestmentResearch:
                     issues = [i for i in state["issues"] if i["stock_key"] in keys | {"*"}]
                     if not issues:
                         continue
-                    prepared = deps.prepared.model_copy(update={"securities": stocks,
-                        "evidence": [e for e in deps.prepared.evidence if e.stock_key in keys or e.stock_key == "*"]})
+                    prepared = deps.prepared.scoped(keys)
                     current = {**state, "prepared": prepared.model_dump(mode="json"),
                                "group": str(index // deps.policy.max_group_size), "epoch": state.get("epoch", 0) + 1,
                                "issues": issues, "messages": [], "rounds": 0}

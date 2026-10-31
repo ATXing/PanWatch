@@ -21,14 +21,23 @@ ROLE_GUIDANCE = {
 }
 
 SESSION_GUIDANCE = {
-    "premarket": "Plan today's opening scenarios, overnight market transmission, catalysts, support/resistance and conditional responses. Do not assume today's opening/closing prices are already known. Analyze the scoped stocks independently of whether a postmarket report exists. In session_notes, give EVERY stock a brief focus and two concrete conditional responses (upside and downside); do not invent an opening gap percentage.",
-    "postmarket": "Review the supplied session's market context, each stock's technical/flow/event evidence, portfolio differences and next-session focus. Distinguish observed closing facts from intraday snapshots and avoid calling an unfinished session a closing fact. In session_notes, attribute each stock's observed move to supported drivers, distinguish correlation from causality, and evaluate the supplied prior_plan as confirmed/refuted/mixed/unresolved. If no prior_plan is supplied, use no_prior; never invent a morning forecast or call pending triggers a win.",
+    "premarket": "Plan today's opening scenarios, overnight market transmission, catalysts, support/resistance and conditional responses. Do not assume today's opening/closing prices are already known. Analyze the scoped stocks independently of whether a postmarket report exists. Do not invent an opening gap percentage.",
+    "postmarket": "Review the supplied session's market context, each stock's technical/flow/event evidence, portfolio differences and next-session focus. Distinguish observed closing facts from intraday snapshots and avoid calling an unfinished session a closing fact.",
     "intraday": "Focus on what changed at the captured time, whether the move exceeds normal ATR volatility, immediate levels and when the view fails. Future closing confirmation belongs to a plan condition. Avoid repeating unchanged background or manufacturing an alert from missing evidence.",
+}
+
+# Session notes are authored by strategy alone; every other role has that field removed from its
+# schema, so the guidance must not reach them or they emit a contract they cannot own.
+SESSION_NOTE_GUIDANCE = {
+    "premarket": "In session_notes, give EVERY stock exactly one entry with the fields stock_key, summary, upside, downside, prior_verdict and evidence_ids: summary is a one-sentence focus, upside and downside are concrete conditional responses, and evidence_ids cites the captured evidence you used. Do not add any other field.",
+    "postmarket": "In session_notes use exactly the fields stock_key, summary, upside, downside, prior_verdict and evidence_ids: attribute each stock's observed move to supported drivers in summary, distinguish correlation from causality, cite the captured evidence in evidence_ids, and evaluate the supplied prior_plan as confirmed/refuted/mixed/unresolved. If no prior_plan is supplied, use no_prior; never invent a morning forecast or call pending triggers a win.",
 }
 
 
 def instructions(role, profile, fast=False):
     value = ROLE_GUIDANCE.get(role, "") + " " + SESSION_GUIDANCE[profile]
+    if role == "strategy" and profile in SESSION_NOTE_GUIDANCE:
+        value += " " + SESSION_NOTE_GUIDANCE[profile]
     if role in {"technical", "flow", "events"}:
         value += " Other domains are withheld from your scoped role; do not describe them as missing solely because you cannot see them. Set debate_requested only for a material catalyst or evidence conflict needing opposing views; ordinary missing fields alone are not enough."
     if fast and role == "strategy":
