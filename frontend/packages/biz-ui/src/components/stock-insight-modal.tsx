@@ -2438,9 +2438,7 @@ function UziReportSection({
           {integ && (
             <span
               className="text-[11px] text-muted-foreground"
-              title={`只统计分数确实由采集数据算出的维度；权重占全部维度的 ${
-                integ.real_weight_pct ?? 0
-              }%`}
+              title={`只统计分数确实由采集数据算出的维度；权重占全部维度的 ${integ.real_weight_pct ?? 0}%。评分实测口径（19 维），与进度面板「采集上报 22/22（含取空）」不是同一件事`}
             >
               实测 {integ.real_dims}/{integ.total_dims} 维 · 覆盖权重 {integ.real_weight_pct ?? 0}%
             </span>
@@ -2728,11 +2726,22 @@ function UziReportSection({
       {oneLiner && (
         <div className="space-y-1">
           <div className="card p-3 text-[12px] leading-relaxed text-foreground/90 whitespace-pre-line">
-            {oneLiner}
+            {(() => {
+              // 末行若为杀猪盘扫描结论（🟢/🟡/🔴 开头），就地追加来源小字，替代原先框外的独立说明行
+              const lines = oneLiner.split('\n')
+              const lastIdx = lines.length - 1
+              return lines.map((ln, i) => (
+                <span key={i}>
+                  {ln}
+                  {i === lastIdx && /[🟢🟡🔴]/.test(ln) && (
+                    <span className="text-[10px] text-muted-foreground">（第 18 项「杀猪盘扫描」的结论，非买卖建议）</span>
+                  )}
+                  {i < lastIdx ? '\n' : ''}
+                </span>
+              ))
+            })()}
           </div>
           <div className="text-[10px] text-muted-foreground leading-relaxed">
-            末行「🟢 安全」是下方第 18 项「杀猪盘扫描」的结论，不是买卖建议。
-            <br />
             这段是 UZI 原文。
             {report?.uzi_overall_score != null &&
             report?.fundamental_score != null &&
