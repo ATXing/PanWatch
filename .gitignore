@@ -41,3 +41,8 @@ _req_*.txt
 *.orig
 *.rej
 .panwatch_cred.json
+
+# 调试截图 / 前端临时产物 / agent 工作目录（2026-10-31）
+_shots/
+frontend/tmp/
+.workbuddy/
