@@ -230,29 +230,40 @@ def _calculate_macd(
 
 
 def _calculate_rsi(closes: list[float], period: int) -> float | None:
-    """计算 RSI"""
+    """计算 RSI，采用通达信/同花顺口径（Wilder 递推平滑）。
+
+    通达信公式::
+
+        LC  := REF(CLOSE,1);
+        RSI := SMA(MAX(CLOSE-LC,0),N,1) / SMA(ABS(CLOSE-LC),N,1) * 100
+
+    其中 ``SMA(X,N,1)`` 是本系统特有的递推平滑 ``Y = (X + (N-1)*Y_prev) / N``，
+    等效 Wilder 平滑（alpha = 1/N），**不是**简单移动平均。
+
+    历史坑（勿回退）：早期版本用「最近 N 日涨跌幅的简单平均」（Cutler's RSI），
+    与国内看盘软件差异极大——实测伊利 600887 2026-10-26 收盘，
+    简单平均 RSI6 = 59.01，通达信/同花顺 = 71.79，差 12.78，
+    直接把「偏强」判成「中性」、技术评分少 1 分。A 股与港股用同一套口径，
+    本函数不含任何市场分支。
+
+    数据不足 period+1 根时返回 None；全程无涨跌（分母为 0）时按既有约定返回 100。
+    """
     if len(closes) < period + 1:
         return None
 
-    gains = []
-    losses = []
-    for i in range(1, len(closes)):
+    # 首值取第一个增量的原值，与通达信一致（长序列下初值影响已衰减殆尽，
+    # 本模块统一取 3000 根日线，远大于收敛所需长度）
+    gain = max(closes[1] - closes[0], 0.0)
+    total = abs(closes[1] - closes[0])
+    decay = period - 1
+    for i in range(2, len(closes)):
         change = closes[i] - closes[i - 1]
-        if change > 0:
-            gains.append(change)
-            losses.append(0)
-        else:
-            gains.append(0)
-            losses.append(abs(change))
+        gain = (max(change, 0.0) + decay * gain) / period
+        total = (abs(change) + decay * total) / period
 
-    # 使用最近 period 天计算
-    avg_gain = sum(gains[-period:]) / period
-    avg_loss = sum(losses[-period:]) / period
-
-    if avg_loss == 0:
+    if total == 0:
         return 100.0
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    return gain / total * 100
 
 
 def _calculate_kdj(
@@ -296,13 +307,21 @@ def _calculate_kdj(
 def _calculate_boll(
     closes: list[float], period: int = 20, num_std: int = 2
 ) -> tuple[float, float, float, float] | None:
-    """计算布林带：上轨、中轨、下轨、带宽"""
+    """计算布林带：上轨、中轨、下轨、带宽。
+
+    标准差取**样本标准差**（除以 N-1），与通达信 ``STD(X,N)`` / 同花顺 BOLL 一致。
+    历史坑（勿回退）：早期版本除的是 N（总体标准差），带宽系统性偏窄
+    ``sqrt(N/(N-1))`` ≈ 2.6%（N=20）——实测伊利 600887 2026-10-26，
+    上轨 28.681 vs 通达信 28.710、下轨 26.516 vs 26.490，会让「贴轨/突破上轨」
+    在临界位置判反。A 股与港股同一口径，无市场分支。
+    """
     if len(closes) < period:
         return None
 
     recent = closes[-period:]
     mid = sum(recent) / period
-    variance = sum((x - mid) ** 2 for x in recent) / period
+    divisor = period - 1 if period > 1 else 1
+    variance = sum((x - mid) ** 2 for x in recent) / divisor
     std = variance**0.5
 
     upper = mid + num_std * std
