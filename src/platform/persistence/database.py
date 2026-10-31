@@ -2,6 +2,8 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
+import threading
 import time
 from datetime import datetime
 
@@ -16,7 +18,9 @@ from src.platform.persistence.migrations import (
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "panwatch.db")
+DB_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "panwatch.db")
+)
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 # SQLite 适合本地开发和单实例部署，但并发写入时不能无限等待锁。
@@ -25,13 +29,55 @@ os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 SQLITE_BUSY_TIMEOUT_MS = 5_000
 SQLITE_INIT_RETRY_DELAYS = (0.5, 1.0, 2.0)
 
+# 本机是「一个进程开服务 + 若干子进程（UZI 调研、批量排雷）直连同一个库」，
+# 而连接池是 NullPool：每个请求开一个连接、用完即关。WAL 模式下最后一个连接
+# 关闭时会删掉 -wal/-shm，恰好撞上另一端正在建连接，Windows 上就会返回
+# SQLITE_CANTOPEN（"unable to open database file"）。这种失败是亚秒级的，
+# 实测 80 次独立探测全成功、而服务进程偶发一次，所以只做几次快速重试，
+# 不要让它升级成整个请求 500。
+SQLITE_CONNECT_RETRY_DELAYS = (0.05, 0.15, 0.4)
+
+
+def _is_transient_open_error(exc: BaseException) -> bool:
+    """判断是否为「短暂打不开/被占用/短暂只读」，这类错误重试即可，不必冒泡。
+
+    `attempt to write a readonly database` 与 `unable to open database file` 是
+    同一个根因的两种表现：WAL 模式下最后一个连接关闭时会 checkpoint 并删除
+    -wal/-shm，另一端此刻建连接并写入就会拿到 readonly。它同样是亚秒级的，
+    因此和「打不开/被锁」一起归入可重试。
+    """
+    message = str(exc).lower()
+    return (
+        "unable to open database file" in message
+        or "database is locked" in message
+        or "database table is locked" in message
+        or "readonly database" in message
+    )
+
+
+def _connect_sqlite() -> sqlite3.Connection:
+    """建立 SQLite 连接，对短暂的打开失败做有限次重试。"""
+    last_error: BaseException | None = None
+    for attempt, delay in enumerate((0.0, *SQLITE_CONNECT_RETRY_DELAYS)):
+        if delay:
+            time.sleep(delay)
+        try:
+            return sqlite3.connect(
+                DB_PATH,
+                timeout=SQLITE_BUSY_TIMEOUT_MS / 1_000,
+                check_same_thread=False,
+            )
+        except sqlite3.OperationalError as exc:
+            if not _is_transient_open_error(exc) or attempt >= len(SQLITE_CONNECT_RETRY_DELAYS):
+                raise
+            last_error = exc
+    raise last_error if last_error is not None else RuntimeError("sqlite connect failed")
+
+
 engine = create_engine(
     f"sqlite:///{DB_PATH}",
     echo=False,
-    connect_args={
-        "timeout": SQLITE_BUSY_TIMEOUT_MS / 1_000,
-        "check_same_thread": False,
-    },
+    creator=_connect_sqlite,
     poolclass=NullPool,
 )
 
@@ -44,6 +90,58 @@ def _set_sqlite_pragma(dbapi_conn, connection_record):
     cursor.execute("PRAGMA synchronous=NORMAL")
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
+
+
+# ── WAL 锚连接 ────────────────────────────────────────────────────────────────
+# WAL 模式下，最后一个连接关闭时 SQLite 会 checkpoint 并删除 -wal/-shm。
+# NullPool 让每个请求连接都成为「最后一个连接」，所以任何一次请求结束都可能
+# 删掉这两个文件；此刻另一端正在建连接并写入，就会拿到
+# `attempt to write a readonly database`（与上面注释里的 SQLITE_CANTOPEN
+# 是同一个根因的两种表现）。
+#
+# 实测（2026-10-28，8 线程在库副本上各写 80 次）：
+#   现状（每次开关连接）→ 7/640 次 readonly（1.09%）
+#   持有一个常驻连接    → 0/640 次（0.00%）
+#
+# 因此保留一个永不关闭的空闲连接，把 -wal/-shm 的生命期从「最后一个请求连接」
+# 改绑到「进程」。代价是 WAL 文件常驻磁盘，但 auto-checkpoint（默认 1000 页
+# ≈ 4MB）会持续回收，不会无限增长。
+_anchor: sqlite3.Connection | None = None
+_anchor_lock = threading.Lock()
+
+
+def hold_wal_anchor() -> sqlite3.Connection:
+    """建立/返回常驻锚连接，只用来占住 -wal/-shm，不参与业务读写。"""
+    global _anchor
+    if _anchor is not None:
+        return _anchor
+    with _anchor_lock:
+        if _anchor is None:
+            con = sqlite3.connect(
+                DB_PATH, timeout=SQLITE_BUSY_TIMEOUT_MS / 1_000, check_same_thread=False
+            )
+            try:
+                con.execute("PRAGMA journal_mode=WAL")
+                con.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+                con.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+            except Exception:
+                con.close()
+                raise
+            _anchor = con
+            logger.info("已建立 WAL 常驻锚连接，-wal/-shm 将随进程存活")
+    return _anchor
+
+
+def release_wal_anchor() -> None:
+    """关闭锚连接（仅测试/退出时使用）。"""
+    global _anchor
+    with _anchor_lock:
+        if _anchor is not None:
+            try:
+                _anchor.close()
+            except Exception:
+                pass
+            _anchor = None
 
 
 SessionLocal = sessionmaker(bind=engine)
@@ -66,6 +164,11 @@ def init_db():
     for attempt in range(len(SQLITE_INIT_RETRY_DELAYS) + 1):
         try:
             _init_db_once()
+            try:
+                hold_wal_anchor()
+            except Exception as exc:  # noqa: BLE001
+                # 锚连接只是防抖措施，建不起来不应阻塞服务启动
+                logger.warning("WAL 常驻锚连接建立失败（不影响服务启动）: %s", exc)
             return
         except Exception as exc:
             if not _is_sqlite_lock_error(exc) or attempt >= len(SQLITE_INIT_RETRY_DELAYS):
@@ -94,13 +197,12 @@ def _init_db_once() -> None:
 
 
 def _is_sqlite_lock_error(exc: BaseException) -> bool:
-    """识别 SQLAlchemy 包装后的 SQLite 锁异常。"""
+    """识别 SQLAlchemy 包装后的 SQLite 锁/短暂打不开异常。"""
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        message = str(current).lower()
-        if "database is locked" in message or "database table is locked" in message:
+        if _is_transient_open_error(current):
             return True
         current = current.__cause__ or current.__context__
     return False

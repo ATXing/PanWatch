@@ -7,6 +7,8 @@ HTTP 中间件、认证依赖和各模块 router；具体业务规则仍由 ``mo
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
 
 from src.modules.administration.api import (
     auth,
@@ -62,6 +64,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(OperationalError)
+async def handle_database_unavailable(request: Request, exc: OperationalError):
+    """数据库打不开/被占用时给出可读的 503，而不是裸的 500。
+
+    背景：本机是「服务进程 + 多个子进程（UZI 调研等）直连同一个 SQLite 库」，
+    NullPool 让每条连接用完即关，WAL 下 -wal/-shm 随之删除重建，Windows 上
+    偶发 SQLITE_CANTOPEN。连接层已经做快速重试，这里兜住仍然失败的情况：
+    前端拿到的是「数据库暂时不可用，请重试」而不是一整页 Failed to fetch / 500。
+    """
+    cause = getattr(exc, "orig", exc) or exc
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": (
+                "数据库暂时不可用（本地库被其他进程短暂占用），请稍后重试。"
+                f"原始错误：{str(cause)[:200]}"
+            )
+        },
+    )
 
 # 认证路由（无需登录）
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
