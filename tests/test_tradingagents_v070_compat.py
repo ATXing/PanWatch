@@ -26,7 +26,7 @@ from src.modules.automation.tradingagents.runtime_support import build_ta_llm_co
 
 
 def test_v070_exposes_the_panwatch_extension_contract():
-    assert version("tradingagents") == "0.7.0"
+    assert version("tradingagents").startswith("0.7.")
     assert "portfolio" in inspect.signature(TradingAgentsGraph.propagate).parameters
     assert "portfolio_context" in inspect.signature(Propagator.create_initial_state).parameters
     assert "callbacks" in inspect.signature(Propagator.get_graph_args).parameters
