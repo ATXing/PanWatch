@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -30,6 +31,8 @@ import time
 from datetime import datetime
 
 from src.modules.research import uzi_sync
+
+logger = logging.getLogger(__name__)
 
 UZI_ROOT = os.environ.get("UZI_ROOT_DIR", r"D:/Projects/UZI-Skill")
 JOB_LOG_DIR = os.environ.get(
@@ -45,6 +48,11 @@ DEFAULT_TIER = "medium"
 # job_id -> Popen，用于判断 running 是否真有活进程
 _PROCS: dict[str, subprocess.Popen] = {}
 _LOCK = threading.Lock()
+
+# 子进程总时长上限（秒）。只防「卡死后永远 running」，不作为性能约束：
+# UZI 自身 wave 超时 360s×2 封顶约 15 分钟，medium 实测 7-10 分钟；
+# 这里取 45 分钟 ≈ 4 倍余量，正常任务不可能触发。
+JOB_MAX_SEC = int(os.environ.get("UZI_JOB_MAX_SEC", "2700"))
 
 
 def _now() -> str:
@@ -96,6 +104,7 @@ _PHASE_HINTS = (
     ("collect", "采集数据中"),
     ("wave 1", "采集基础数据"),
     ("wave 2", "采集分维度数据"),
+    ("wave 3", "采集行业与宏观维度"),
     ("score", "计算维度分数"),
     ("modeling", "建模与估值"),
     ("assemble", "生成报告"),
@@ -104,8 +113,14 @@ _PHASE_HINTS = (
 )
 
 
-def _log_progress(log_path: str) -> dict:
-    """读日志尾部 → {done_dims, phase}。仅用于 UI 提示，不参与逻辑判断。"""
+def _log_progress_legacy(log_path: str) -> dict:
+    """旧实现（读尾部 64KB + 关键词猜阶段）。
+
+    两个已知缺陷，保留仅用于 `UZI_PROGRESS_V2=0` 回滚对照：
+    1. 只读末尾 65536 字节 ⇒ 任务久了早期 `ok` 行被挤出窗口，计数会**倒退**；
+    2. `_PHASE_HINTS` 取的是「元组里最后一个命中的 key」，不是日志里最后出现的，
+       且 `collect` 是 `collect 完成` 的子串 ⇒ 采集结束后仍显示「采集数据中」。
+    """
     if not log_path or not os.path.exists(log_path):
         return {"done_dims": 0, "phase": ""}
     try:
@@ -123,6 +138,23 @@ def _log_progress(log_path: str) -> dict:
         if key in low:
             phase = label  # 取最后一个命中的（越靠后越新）
     return {"done_dims": done, "phase": phase}
+
+
+def _log_progress(log_path: str, tier: str = "medium") -> dict:
+    """读日志算 {done_dims, phase}。仅用于 UI 提示，不参与逻辑判断。
+
+    v2 实现委托 `uzi_progress.summary()`：全量扫描、按日志出现顺序定阶段、
+    解析 quality。返回契约不变，调用方无需改动。
+    """
+    if os.environ.get("UZI_PROGRESS_V2", "1").strip() == "0":
+        return _log_progress_legacy(log_path)
+    try:
+        from src.modules.research.uzi_progress import summary
+
+        return summary(log_path, tier)
+    except Exception as e:  # noqa: BLE001 - 进度是增强项，绝不能连坐主流程
+        logger.warning(f"[UZI] 进度解析降级到 legacy: {e}")
+        return _log_progress_legacy(log_path)
 
 
 def _log_tail(log_path: str, n: int = 12) -> list[str]:
@@ -165,7 +197,7 @@ def _row_to_dict(row) -> dict:
     d = dict(zip(keys, row))
     res = d.pop("result_json", None)
     d["result"] = json.loads(res) if res else None
-    prog = _log_progress(d.get("log_path") or "")
+    prog = _log_progress(d.get("log_path") or "", d.get("tier") or DEFAULT_TIER)
     d["done_dims"] = prog["done_dims"]
     d["phase"] = prog["phase"]
     d["running"] = d.get("status") == "running"
@@ -199,18 +231,115 @@ def _select_job(conn: sqlite3.Connection, symbol: str, market: str):
     return cur.fetchone()
 
 
+_DONE_MARKERS = ("✅ 完成!", "报告路径:")
+
+
+def _pid_alive(pid) -> bool:
+    """pid 是否仍存活。只用标准库：Windows 走 OpenProcess，其他平台 os.kill(pid, 0)。
+
+    不能拿「内存里有没有 Popen 句柄」当存活判据——父进程重启过就没有句柄了，
+    但子进程可能还在正常跑（2026-10-31 实测：600519 lite 明明跑完并落盘了报告，
+    却被记成「服务重启，任务已中断」，用户会白重跑一遍）。
+    """
+    if not pid:
+        return False
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            handle = kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+            if not handle:
+                # 5 = ERROR_ACCESS_DENIED：进程存在但没权限问，算活着而非误判死亡
+                return ctypes.get_last_error() == 5
+            try:
+                code = wintypes.DWORD()
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                    return False
+                return code.value == 259  # STILL_ACTIVE
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:  # noqa: BLE001
+            return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _log_says_done(log_path: str) -> bool:
+    """孤儿作业的收尾证据：UZI 正常结束会在日志末尾打印「✅ 完成!」+ 报告路径。"""
+    if not log_path:
+        return False
+    try:
+        size = os.path.getsize(log_path)
+        with open(log_path, "rb") as f:
+            f.seek(max(0, size - 8192))
+            tail = f.read().decode("utf-8", errors="ignore")
+    except OSError:
+        return False
+    return any(m in tail for m in _DONE_MARKERS)
+
+
+def _overdue(started_at) -> bool:
+    """起跑时间超过「进程上限 + 10 分钟」就认作僵死，避免孤儿永远挂着 running。"""
+    try:
+        started = datetime.strptime(str(started_at), "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return False
+    return (datetime.now() - started).total_seconds() > JOB_MAX_SEC + 600
+
+
 def _reap_stale(conn: sqlite3.Connection, row) -> None:
-    """服务重启后，内存里已无对应 Popen 的 running 任务标记为 interrupted。"""
+    """收拣本进程没有 Popen 句柄的 running 任务（父进程重启过，或子进程已退）。
+
+    判据按「证据」排序，不再只看内存字典：
+    1. 子进程还活着 → 什么都不做（父进程重启不该等于任务失败）；
+    2. 子进程已退、但日志有收尾标记 → 其实成功了，补跑一次入库；
+    3. 子进程已退、无收尾标记 → 才标记 interrupted，且文案说清是「进程退出」，
+       不能编成「服务重启」。
+    """
     if not row or row[5] != "running":
         return
-    job_id = row[0]
+    job_id, ticker, pid, log_path, started_at = row[0], row[3], row[6], row[10], row[7]
     with _LOCK:
-        alive = job_id in _PROCS
-    if alive:
+        if job_id in _PROCS:
+            return
+    alive = _pid_alive(pid)
+    if alive and not _overdue(started_at):
+        return
+    if not alive and _log_says_done(log_path):
+        status, err, result = "success", None, None
+        try:
+            result = uzi_sync.sync_symbol(ticker) if ticker else None
+            if result is None:
+                status, err = "failed", "进程已结束但磁盘无 .cache 产出，同步失败"
+        except Exception as e:  # noqa: BLE001
+            status, err = "failed", f"同步入库失败: {e}"
+        conn.execute(
+            "UPDATE uzi_jobs SET status=?, finished_at=?, error=?, result_json=?, updated_at=?"
+            " WHERE job_id=? AND status='running'",
+            (
+                status,
+                _now(),
+                err,
+                json.dumps(result, ensure_ascii=False) if result else None,
+                _now(),
+                job_id,
+            ),
+        )
+        conn.commit()
         return
     conn.execute(
         "UPDATE uzi_jobs SET status='interrupted', finished_at=?, updated_at=?,"
-        " error=COALESCE(error,'服务重启，任务已中断') WHERE job_id=? AND status='running'",
+        " error=COALESCE(error,'任务进程已退出且未见收尾标记，判定为中断')"
+        " WHERE job_id=? AND status='running'",
         (_now(), _now(), job_id),
     )
     conn.commit()
@@ -232,7 +361,16 @@ def get_job(symbol: str, market: str) -> dict | None:
 def _watch(job_id: str, proc: subprocess.Popen, ticker: str, symbol: str, market: str):
     """等子进程结束 → 成功则同步进库。跑在 daemon 线程里。"""
     try:
-        code = proc.wait()
+        code = proc.wait(timeout=JOB_MAX_SEC)
+    except subprocess.TimeoutExpired:
+        # 卡死兜底：超过上限强制终止，否则 UI 会一直「调研中」、elapsed 无限增长
+        code = -9
+        err = f"超过 {JOB_MAX_SEC // 60} 分钟未完成，已强制终止"
+        try:
+            proc.kill()
+            proc.wait(timeout=10)
+        except Exception:  # noqa: BLE001
+            pass
     except Exception as e:  # noqa: BLE001
         code = -1
         err = f"等待进程失败: {e}"

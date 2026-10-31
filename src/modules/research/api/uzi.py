@@ -5,23 +5,30 @@
 - POST /api/uzi/resync?symbol=&market=  从磁盘重读最新 UZI 产出并刷新库(不触发 LLM)
 - POST /api/uzi/analyze?symbol=&market=&tier=  后台起一次真实调研(子进程跑 run.py)
 - GET  /api/uzi/job?symbol=&market=  轮询调研进度;成功时已自动回写库
+- GET  /api/uzi/gap-prompt?symbol=&market=  把缺的维度渲染成一段可粘贴的补数 prompt
 
 UZI 是排雷/尽调层,不是 buy/sell 信号;此端点只读接入,不动交易逻辑。
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 import sqlite3
+import time
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from src.modules.research import uzi_jobs, uzi_sync
+from src.modules.research import uzi_gap_prompt, uzi_jobs, uzi_progress, uzi_sync
+from src.platform.events.sse import format_sse_comment, format_sse_event
 from src.platform.persistence.database import get_db
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 # 公开路由:完整报告 HTML 经 window.open 打开,浏览器不会带 Bearer 头,故不鉴权。
@@ -190,6 +197,19 @@ def get_uzi_report_html(symbol: str, market: str):
     )
 
 
+@router.get("/gap-prompt")
+def get_gap_prompt(symbol: str = Query(...), market: str = Query(...)):
+    """把「这只票缺哪些维、每维要什么字段、怎么写快照、跑什么命令」渲染成一段 prompt。
+
+    生成的是给 WorkBuddy agent 读的任务卡(不是给人看的说明). 只读, 不触发调研:
+    通达信 MCP 的 token 只在客户端侧, 后端拿不到数据, 只能让人把 prompt 粘过去。
+    """
+    res = uzi_gap_prompt.build(symbol, market)
+    if not res.get("ok"):
+        raise HTTPException(status_code=404, detail=res.get("reason") or "no report")
+    return res
+
+
 @router.post("/resync")
 def resync_uzi(
     symbol: str = Query(...),
@@ -240,3 +260,104 @@ def get_uzi_job(
     if tail > 0:
         job["log_tail"] = uzi_jobs._log_tail(job.get("log_path") or "", tail)
     return {"exists": True, "job": job}
+
+
+# ── 动态进度 ────────────────────────────────────────────────────────────────
+# 数据来源是子进程日志（UZI 以独立进程跑，父进程看不到内存态）。
+# 日志只有 9KB 左右，全量重扫约 0.5ms，1s 一次无压力；解析结果按
+# (size, mtime_ns) 命中缓存，文件不变时零成本。
+
+UZI_SSE_POLL_SEC = 1.0
+UZI_SSE_HEARTBEAT_TICKS = 15
+# 与进程上限对齐（默认 45 分钟）+ 2 分钟收尾，别把长尾任务切了
+UZI_SSE_MAX_DURATION_SEC = uzi_jobs.JOB_MAX_SEC + 120
+_UZI_TERMINAL_STATUSES = ("success", "failed", "interrupted")
+
+
+def _uzi_progress_snapshot(symbol: str, market: str) -> dict:
+    """组装一次进度快照：1 次 sqlite 读 + 解析（命中缓存时零成本）。"""
+    job = uzi_jobs.get_job(symbol, market)
+    if not job:
+        return {"exists": False}
+    try:
+        job["progress"] = uzi_progress.build_progress(job)
+    except Exception as e:  # noqa: BLE001 - 进度是增强项，坏了不能连坐 /job
+        logger.warning(f"[UZI] 组装进度失败 {symbol}.{market}: {e}")
+        job["progress"] = None
+    return {"exists": True, "job": job}
+
+
+@router.get("/job/progress")
+def get_uzi_job_progress(
+    symbol: str = Query(...),
+    market: str = Query(...),
+):
+    """调研进度快照（7 阶段 + 22 维状态 + 用量）。无任务返回 exists=False。
+
+    与 `/job` 的区别：`/job` 只给一行文字级的 `phase`/`done_dims`，
+    这里给结构化的 `progress`，供前端画阶段列表与维度网格。
+    `job.progress` 为 null 表示解析降级，调用方应回退到 `/job` 的旧字段。
+    """
+    return _uzi_progress_snapshot(symbol, market)
+
+
+@router.get("/job/stream")
+async def stream_uzi_job_progress(
+    symbol: str = Query(...),
+    market: str = Query(...),
+):
+    """SSE 推流：每 1s 重算快照，内容变了才推，终态发 done 并关流。
+
+    与 `/api/agents/runs/{trace_id}/progress/stream` 同构（前端可共用一套
+    `subscribeSSE` 消费方式），区别是这里每 tick 直接读日志文件而不是查库。
+    """
+
+    async def gen():
+        seq = 0
+        last = ""
+        ticks = 0
+        started = time.monotonic()
+        while time.monotonic() - started < UZI_SSE_MAX_DURATION_SEC:
+            try:
+                snap = await asyncio.to_thread(_uzi_progress_snapshot, symbol, market)
+            except Exception as e:  # noqa: BLE001 - 单次快照失败不能断流
+                logger.warning(f"[UZI] 进度快照失败 {symbol}.{market}: {e}")
+                await asyncio.sleep(UZI_SSE_POLL_SEC)
+                continue
+
+            payload = json.dumps(snap, ensure_ascii=False, default=str)
+            if payload != last:
+                last = payload
+                ticks = 0
+                seq += 1
+                yield format_sse_event(seq, "progress", payload)
+            else:
+                ticks += 1
+                if ticks >= UZI_SSE_HEARTBEAT_TICKS:
+                    ticks = 0
+                    yield format_sse_comment()
+
+            job = snap.get("job") or {}
+            status = job.get("status") or ""
+            if not snap.get("exists") or status in _UZI_TERMINAL_STATUSES:
+                seq += 1
+                yield format_sse_event(
+                    seq,
+                    "done",
+                    {"exists": bool(snap.get("exists")), "status": status or "not_found"},
+                )
+                return
+            await asyncio.sleep(UZI_SSE_POLL_SEC)
+
+        seq += 1
+        yield format_sse_event(seq, "done", {"status": "timeout"})
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

@@ -92,6 +92,22 @@ export const insightApi = {
     fetchAPI<T>(
       `/uzi/job?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}&tail=${tail}`,
     ),
+
+  /** 结构化进度快照（7 阶段 + 逐维状态 + 用量） */
+  uziJobProgress: (symbol: string, market: string) =>
+    fetchAPI<UziJobProgressResponse>(
+      `/uzi/job/progress?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}`,
+    ),
+
+  /** SSE 路径（交给 subscribeSSE 消费，它内部会拼 /api 前缀） */
+  uziJobStreamPath: (symbol: string, market: string) =>
+    `/uzi/job/stream?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}`,
+
+  /** 把缺的维度渲染成一段可粘贴的补数 prompt（交给 WorkBuddy agent 用通达信补数据） */
+  uziGapPrompt: <T>(symbol: string, market: string) =>
+    fetchAPI<T>(
+      `/uzi/gap-prompt?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}`,
+    ),
 }
 
 export interface UziDimension {
@@ -174,6 +190,116 @@ export interface UziListItem {
   report_time?: string | null
 }
 
+/** /uzi/gap-prompt 返回：给 WorkBuddy agent 执行的补数任务卡 */
+export interface UziGapPromptResult {
+  ok: boolean
+  symbol: string
+  market: string
+  /** UZI 原始 ticker，如 688363.SH */
+  ticker: string
+  name: string
+  tier?: string | null
+  /** 缺多少维（已排除该市场不适用的维） */
+  n_missing: number
+  /** 实测维数 / 总维数，用于「全部实测」时的提示 */
+  real_dims?: number
+  total_dims?: number
+  /** 按收益分档的缺口数：A 直接改分 / B 喂评委 / C 只改文案 */
+  tier_counts: Record<string, number>
+  /** 非空表示读不到 UZI 缓存，prompt 只有维度级描述 */
+  raw_note?: string
+  prompt: string
+}
+
+/** UZI 调研的 7 个阶段（顺序即执行顺序，后端 uzi_progress.STAGE_SPECS 直出） */
+export type UziStageKey =
+  | 'preflight'
+  | 'collect_w1'
+  | 'collect_w2'
+  | 'collect_w3'
+  | 'scoring'
+  | 'synthesize'
+  | 'render'
+
+export interface UziStageRow {
+  key: UziStageKey
+  label: string
+  status: 'pending' | 'running' | 'done' | 'skipped' | 'failed'
+  /** "13/17"、"22/22 维"、"464.9s" */
+  detail?: string
+}
+
+/**
+ * 维度状态。`ok` 行只代表 fetcher 跑完了，quality 才是真实结果，
+ * 所以 full/partial/missing 必须分开——`missing` 等于白跑。
+ */
+export type UziDimState =
+  | 'pending'
+  | 'full'
+  | 'partial'
+  | 'missing'
+  | 'error'
+  | 'timeout'
+  | 'skipped'
+
+export interface UziDimItem {
+  key: string
+  label: string
+  /** basic / finance / market / chain / company / macro / safety */
+  group: string
+  state: UziDimState
+  note?: string
+}
+
+export interface UziProgressUsage {
+  /** 本档位应跑的 fetcher 数（lite 9 / medium 22） */
+  fetchers_expected: number
+  /** banner 里 UZI 自报的 "fetchers: 20/20 维" */
+  fetchers_declared?: number | null
+  fetchers_total?: number | null
+  max_workers?: number | null
+  /** baostock 等数据源的 "login success!" 次数，代表真实外呼 */
+  source_logins: number
+  /** 搜索预算上限（lite 0 / medium 30） */
+  ddg_budget: number
+  /** UZI 从不打印真实消耗，恒为 null —— UI 必须标注「未上报」 */
+  ddg_used: number | null
+  collect_sec?: number | null
+  log_bytes: number
+}
+
+export interface UziProgress {
+  schema: number
+  tier: string
+  /** 解析降级（UZI 改了日志格式等），true 时调用方应回退到 job.phase/done_dims */
+  degraded: boolean
+  degraded_reason?: string
+  stages: UziStageRow[]
+  current_stage: UziStageKey | null
+  dims: {
+    expected: number
+    reported: number
+    full: number
+    partial: number
+    missing: number
+    error: number
+    timeout: number
+    pending: number
+    skipped: number
+    items: UziDimItem[]
+  }
+  usage: UziProgressUsage
+  /** 日志近 60s 仍在增长（服务重启后孤儿进程还在写时为 true） */
+  log_live: boolean
+  parsed_at: string
+}
+
+/** /uzi/job/progress 与 /uzi/job/stream 的共同 payload */
+export interface UziJobProgressResponse {
+  exists: boolean
+  job?: UziJob
+}
+
 /** 后台调研任务（/uzi/analyze 与 /uzi/job 返回） */
 export interface UziJob {
   job_id: string
@@ -202,6 +328,8 @@ export interface UziJob {
     trusted?: boolean
     coverage_pct?: number
   } | null
+  /** 结构化进度（/uzi/job/progress 与 SSE 才有；null 表示解析降级） */
+  progress?: UziProgress | null
   log_tail?: string[]
 }
 

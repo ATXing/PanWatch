@@ -6,11 +6,15 @@ import {
   insightApi,
   stocksApi,
   tradingAgentsApi,
+  subscribeSSE,
   type DeepAnalysisResult,
   type HistoryComparisonResponse,
   type UziJob,
+  type UziGapPromptResult,
+  type UziJobProgressResponse,
   type UziReport,
 } from '@panwatch/api'
+import UziProgressPanel from '@panwatch/biz-ui/components/uzi-progress-panel'
 import { getMarketBadge } from '@panwatch/biz-ui'
 import { useLocalStorage } from '@/lib/utils'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@panwatch/base-ui/components/ui/dialog'
@@ -28,6 +32,8 @@ import AddPositionCalculator from '@panwatch/biz-ui/components/add-position-calc
 import { useTranslation } from 'react-i18next'
 import { resolveSuggestionAction as normalizeSuggestionAction, suggestionPresentation, type SuggestionStateInput } from './suggestion-action'
 import { useMarketColors } from '@/hooks/use-market-colors'
+import { isJobCardAligned } from '../lib/uzi-job-align'
+import { copyTextToClipboard } from '../lib/clipboard'
 import { marketSignTextClass } from '@/lib/market-colors'
 
 interface QuoteResponse {
@@ -2194,12 +2200,16 @@ function UziReportSection({
   const [resyncing, setResyncing] = useState(false)
   // 「仅同步」的结果反馈：磁盘没产出时不能静默无反应
   const [syncMsg, setSyncMsg] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null)
+  // 「补数 prompt」：把缺口导成一段任务卡，粘到 WorkBuddy 让 agent 用通达信补齐
+  const [copyingPrompt, setCopyingPrompt] = useState(false)
   const [job, setJob] = useState<UziJob | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [starting, setStarting] = useState(false)
   const [jobError, setJobError] = useState('')
   const [showLog, setShowLog] = useState(false)
   const [showMissing, setShowMissing] = useState(false)
+  // 终态默认折叠「过程」，失败时一眼看到结论、点开才看哪一维挂了
+  const [showProcess, setShowProcess] = useState(false)
   // 没调研过时默认 medium：lite 只采 7 维，首次调研用全维度更值
   const [tier, setTier] = useState<string>(report?.tier === 'lite' ? 'lite' : 'medium')
   // 同一个 job_id 只触发一次刷新，避免轮询把 onResync 刷爆
@@ -2209,10 +2219,12 @@ function UziReportSection({
   )
 
   // 进面板先问一次：上次发起的调研可能还在后台跑
+  // 用 /job/progress 而不是 /job —— 后者只有一行 phase/done_dims，
+  // 这里要拿结构化的 7 阶段 + 逐维状态（日志尾部改在失败时单独补）
   useEffect(() => {
     let alive = true
     insightApi
-      .uziJob<{ exists: boolean; job?: UziJob }>(symbol, market, 20)
+      .uziJobProgress(symbol, market)
       .then((r) => {
         if (alive && r.exists && r.job) setJob(r.job)
       })
@@ -2224,13 +2236,35 @@ function UziReportSection({
 
   const jobRunning = !!job?.running
 
-  // 运行中：3 秒轮询
+  // 运行中：SSE 主推（1s），3 秒轮询兜底
+  // SSE 只是把刷新粒度从 3s 提到 1s，挂了功能完全不受影响 —— 轮询一行没动。
+  useEffect(() => {
+    if (!jobRunning) return
+    let alive = true
+    const close = subscribeSSE(insightApi.uziJobStreamPath(symbol, market), {
+      onEvent: (ev) => {
+        if (!alive) return
+        if (ev.event === 'progress' && ev.data && typeof ev.data === 'object') {
+          const resp = ev.data as UziJobProgressResponse
+          if (resp.exists && resp.job) setJob(resp.job)
+        }
+      },
+      // 断流交给下面的轮询接力，这里什么都不做
+      onClosed: () => {},
+      onFailed: () => {},
+    })
+    return () => {
+      alive = false
+      close()
+    }
+  }, [jobRunning, symbol, market])
+
   useEffect(() => {
     if (!jobRunning) return
     let alive = true
     const id = window.setInterval(async () => {
       try {
-        const r = await insightApi.uziJob<{ exists: boolean; job?: UziJob }>(symbol, market, 0)
+        const r = await insightApi.uziJobProgress(symbol, market)
         if (alive && r.exists && r.job) setJob(r.job)
       } catch {
         /* 网络抖动忽略，下一轮再试 */
@@ -2249,6 +2283,11 @@ function UziReportSection({
     refreshedJobRef.current = job.job_id
     void onResync()
     onDataChanged?.()
+    // 调研完通常仍有结构性缺口（lite 档只采 7 维），直接指向出口，省得用户不知道下一步
+    setSyncMsg({
+      tone: 'ok',
+      text: '调研完成。若还有维度显示「未采集」，点「补数 prompt」把缺口导出给 WorkBuddy 补齐',
+    })
   }, [job?.status, job?.job_id, onResync, onDataChanged])
 
   // 失败：补一次日志尾部，供排查
@@ -2259,7 +2298,8 @@ function UziReportSection({
     insightApi
       .uziJob<{ exists: boolean; job?: UziJob }>(symbol, market, 40)
       .then((r) => {
-        if (alive && r.job) setJob(r.job)
+        // merge 而不是覆盖：/job 不带 progress，覆盖会让「查看过程」凭空消失
+        if (alive && r.job) setJob((prev) => ({ ...(prev ?? {}), ...r.job }) as UziJob)
       })
       .catch(() => {})
     return () => {
@@ -2302,10 +2342,45 @@ function UziReportSection({
     }
   }
 
+  /**
+   * 把缺口导成一段任务卡复制出去。
+   * 模板在后端生成（DIM_SPECS），前端不再复制一份——19 维「打分器实际读取的字段」
+   * 是单一真相，前端抄一遍必然漂移，漏改就等于让 agent 白补。
+   */
+  const handleCopyGapPrompt = async () => {
+    if (copyingPrompt) return
+    setCopyingPrompt(true)
+    setSyncMsg(null)
+    try {
+      const res = await insightApi.uziGapPrompt<UziGapPromptResult>(symbol, market)
+      if (!res?.ok) {
+        setSyncMsg({ tone: 'warn', text: '生成失败：这只票还没有 UZI 报告，先跑一次调研' })
+        return
+      }
+      if (res.n_missing === 0) {
+        setSyncMsg({ tone: 'ok', text: `${res.total_dims ?? 19} 维全部实测，无需补数` })
+        return
+      }
+      const counts = res.tier_counts || {}
+      const copied = await copyTextToClipboard(res.prompt)
+      if (!copied) {
+        setSyncMsg({ tone: 'warn', text: '复制失败，请检查浏览器剪贴板权限后重试' })
+        return
+      }
+      setSyncMsg({
+        tone: 'ok',
+        text: `已复制补数 prompt · 缺 ${res.n_missing} 维（A ${counts.A || 0} / B ${counts.B || 0} / C ${counts.C || 0}），粘到 WorkBuddy 即可`,
+      })
+    } catch (e) {
+      setSyncMsg({ tone: 'warn', text: e instanceof Error ? e.message : '生成补数 prompt 失败' })
+    } finally {
+      setCopyingPrompt(false)
+    }
+  }
+
   const dims = report?.dimensions || {}
   const dimEntries = Object.entries(dims)
-  const trap = dims['18_trap']
-  // 维度 18 的数据性质：none = 本次没扫公开帖，此时不能把 9 分当「安全」结论
+  const trap = dims['18_trap']  // 维度 18 的数据性质：none = 本次没扫公开帖，此时不能把 9 分当「安全」结论
   const trapStatus = (report?.dim_status || {})['18_trap']
   // UZI 拼 one-liner 时把 emoji 和自己的 emoji 叠加了（"🟢 🟢 安全"），显示前收敛成一个
   const oneLiner = (report?.one_liner || '').replace(/([\u{1F300}-\u{1FAFF}])\s*\1/gu, '$1')
@@ -2314,6 +2389,12 @@ function UziReportSection({
   const scoreColor = (realScore ?? 0) >= 60 ? 'text-emerald-600' : (realScore ?? 0) >= 40 ? 'text-amber-600' : 'text-rose-600'
   const counts = integ?.status_counts || {}
   const missing = integ?.missing || []
+
+  // job 记录与当前报告是不是同一次产出。档位或实测维度数不一致 ⇒ 不是同一次：
+  // 典型场景是直接跑 run.py 后点「仅同步」（不写 uzi_jobs 表），卡片会停在更早那次任务上，
+  // 用它的分数跟当前报告相减就会显示「62 → 60」这种跨记录的假变化。
+  const jobTier = job?.result?.tier || job?.tier || null
+  const jobCardAligned = isJobCardAligned(job?.result, jobTier, report?.tier, integ?.real_dims)
 
   // 按 UZI 官方分类分组（CAT_GROUPS），每组内保持官方维度顺序
   const dimStatus = report?.dim_status || {}
@@ -2417,6 +2498,21 @@ function UziReportSection({
             <RefreshCw className={`w-3.5 h-3.5 ${resyncing ? 'animate-spin' : ''}`} />
             仅同步
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            onClick={handleCopyGapPrompt}
+            disabled={!report || jobRunning || copyingPrompt}
+            title={
+              report
+                ? '把缺的维度导成一段 prompt，粘到 WorkBuddy 让 agent 用通达信补齐，再回来刷新'
+                : '先跑一次调研，才有缺口可补'
+            }
+          >
+            <Copy className={`w-3.5 h-3.5 mr-1 ${copyingPrompt ? 'animate-pulse' : ''}`} />
+            补数 prompt
+          </Button>
           {report?.html_available && (
             <Button
               variant="outline"
@@ -2499,26 +2595,42 @@ function UziReportSection({
           className={`card p-2.5 text-[11px] leading-relaxed ${
             job.status === 'running'
               ? 'border border-primary/30 bg-primary/5'
-              : job.status === 'success'
+              : job.status === 'success' && !jobCardAligned
+                ? 'border border-amber-500/30 bg-amber-500/5'
+                : job.status === 'success'
                 ? 'border border-emerald-500/30 bg-emerald-500/5'
                 : 'border border-rose-500/30 bg-rose-500/5'
           }`}
         >
           {job.status === 'running' && (
-            <div className="flex items-center gap-1.5 flex-wrap text-foreground/85">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary shrink-0" />
-              <span className="font-medium">UZI 调研中</span>
-              <span className="text-muted-foreground">已 {fmtElapsed(job.elapsed_sec)}</span>
-              {job.phase && <span className="text-muted-foreground">· {job.phase}</span>}
-              {typeof job.done_dims === 'number' && job.done_dims > 0 && (
-                <span className="text-muted-foreground">· 已完成 {job.done_dims} 个维度</span>
-              )}
-              <span className="text-muted-foreground">
-                · {job.tier}档 · 约 {job.tier === 'lite' ? '3–6' : '6–15'} 分钟
+            <div className="flex items-start gap-1.5">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary shrink-0 mt-[2px]" />
+              <div className="flex-1 min-w-0">
+                <UziProgressPanel
+                  progress={job.progress}
+                  elapsedSec={job.elapsed_sec}
+                  tier={job.tier}
+                  fallbackPhase={job.phase}
+                  fallbackDoneDims={job.done_dims}
+                />
+              </div>
+            </div>
+          )}
+          {job.status === 'success' && !jobCardAligned && (
+            <div className="flex items-start gap-1.5 flex-wrap text-amber-700 dark:text-amber-400">
+              <span className="font-medium">这条记录与当前报告不是同一次</span>
+              <span className="text-foreground/70">
+                最近一次界面发起：{jobTier || '?'} 档 · 实测 {job.result?.real_dims ?? '?'}/
+                {job.result?.total_dims ?? '?'} 维
+                {job.finished_at ? ` · ${job.finished_at.slice(5, 16)} 完成` : ''}
+              </span>
+              <span className="text-foreground/70">
+                当前报告：{report?.tier || '?'} 档 · 实测 {integ?.real_dims ?? '?'}/{integ?.total_dims ?? '?'} 维
+                （以磁盘产出为准；分数请以上方为准，两者不可相减）
               </span>
             </div>
           )}
-          {job.status === 'success' && (
+          {job.status === 'success' && jobCardAligned && (
             <div className="flex items-center gap-1.5 flex-wrap text-emerald-700 dark:text-emerald-400">
               <span className="font-medium">调研完成，数据已刷新</span>
               {job.result?.real_dims == null ? null : job.result.trusted && job.result.real_score != null ? (
@@ -2548,6 +2660,19 @@ function UziReportSection({
             <div className="flex items-start gap-1.5 flex-wrap text-rose-700 dark:text-rose-400">
               <span className="font-medium">{job.status === 'interrupted' ? '调研中断' : '调研失败'}</span>
               <span className="text-foreground/70">{job.error || '未知原因'}</span>
+              {/* 中断/失败后可原地重来：复用顶部同一套确认卡片（含档位选择 + startAnalyze），不新增请求逻辑 */}
+              <button
+                type="button"
+                className="underline text-[10px] text-foreground/60 disabled:opacity-50"
+                onClick={() => {
+                  setConfirmOpen(true)
+                  setJobError('')
+                }}
+                disabled={starting}
+                title="重新跑一次 UZI 调研（会联网重抓数据）"
+              >
+                重新调研
+              </button>
               {job.log_tail && job.log_tail.length > 0 && (
                 <button
                   type="button"
@@ -2557,6 +2682,17 @@ function UziReportSection({
                   {showLog ? '收起日志' : '看日志'}
                 </button>
               )}
+            </div>
+          )}
+          {job.status !== 'running' && job.progress && !job.progress.degraded && (
+            <div className="mt-1.5 border-t border-border/50 pt-1.5">
+              <UziProgressPanel
+                progress={job.progress}
+                elapsedSec={job.elapsed_sec}
+                tier={job.tier}
+                collapsed={!showProcess}
+                onToggle={() => setShowProcess((v) => !v)}
+              />
             </div>
           )}
           {showLog && job.log_tail && job.log_tail.length > 0 && (

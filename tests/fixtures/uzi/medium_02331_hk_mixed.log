@@ -1,0 +1,296 @@
+
+📊 标准分析 · depth=medium · 预计 5-8 分钟
+  · fetchers: 20/20 维
+  · 评委: 51 位
+  · 机构方法: 17 种
+  · ddgs 预算: 30
+  · fund_holders: 头部 20 家完整
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 游资（UZI）Skills v3.9.4 · 深度分析引擎
+   目标: 02331.HK
+   环境: 本地
+   浏览器: ✗ (headless)
+   Cloudflare: ✗ 未安装
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔑 MX_APIKEY 已设置 · 将优先使用东财妙想 API
+🔄 --no-resume · 强制重抓所有 22 个 fetcher
+🚀 [run.py] v3.0.0 pipeline · 默认路径
+🚀 [pipeline.run] collect · 02331.HK
+  [pipeline] wave 1 · 0_basic    ok      0_basic              partial
+  [pipeline] wave 1 完成 (27.5s)
+  [pipeline] wave 2 · 17 fetcher (max_workers=6)
+   ⚠️  检测到上次 mini_racer 崩溃记录 · 自动跳过 industry/capital_flow/valuation 中的 cninfo/lg 调用
+   ℹ️  想重试 · `rm C:\Users\CXH\.uzi-skill\_minirackercrash.sentinel` 或 `UZI_FORCE_MINI_RACER=1`
+   ⚠️  检测到上次 mini_racer 崩溃记录 · 自动跳过 industry/capital_flow/valuation 中的 cninfo/lg 调用
+   ℹ️  想重试 · `rm C:\Users\CXH\.uzi-skill\_minirackercrash.sentinel` 或 `UZI_FORCE_MINI_RACER=1`
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+    ok      5_chain              partial
+    ok      6_fund_holders       partial
+    ok      6_research           partial
+    ok      1_financials         partial
+    ok      4_peers              full
+    ok      2_kline              partial
+    ok      11_governance        partial
+    ok      8_materials          partial
+    ok      16_lhb               partial
+    ok      10_valuation         partial
+    ok      15_events            partial
+    ok      12_capital_flow      missing
+    ok      19_contests          partial
+    ok      similar_stocks       missing
+    ok      14_moat              partial
+    timeout 17_sentiment         fetcher timeout > 120s
+    timeout 18_trap              fetcher timeout > 120s
+  [pipeline] wave 3 · 4 dependent fetcher
+   ⚠️  检测到上次 mini_racer 崩溃记录 · 自动跳过 industry/capital_flow/valuation 中的 cninfo/lg 调用
+   ℹ️  想重试 · `rm C:\Users\CXH\.uzi-skill\_minirackercrash.sentinel` 或 `UZI_FORCE_MINI_RACER=1`
+    ok      13_policy            partial
+    ok      3_macro              partial
+    ok      7_industry           missing
+    ok      9_futures            partial
+  [pipeline] collect 完成 · 191.4s
+✅ [pipeline.run] raw_data.json 已写 · 进入 scoring 段（v3.0 纯函数编排）
+   ✓ 3_macro        via mx_api: 大宗商品(000979.SH)(指数)的区间涨跌幅、区间成交量等；大宗商品(000979.SH)(指数)的BOLL布林线…
+   ✓ 7_industry     via mx_api: PTA主连的开盘价、收盘价等；PTA主连当前的换手率、是否涨停等
+   ⚠️ 8_materials    兜底失败 · agent 应主动 web search 补抓
+   ⚠️ 9_futures      兜底失败 · agent 应主动 web search 补抓
+   ⚠️ 13_policy      兜底失败 · agent 应主动 web search 补抓
+   合计 · 充足 1 · 兜底成功 2 · 失败 3（共 6 维）
+   ℹ️  Playwright skip · profile=medium · opt-in 未启用 · export UZI_PLAYWRIGHT_ENABLE=1 启用后重跑
+
+  🎯 v2.7 风格识别: balanced (中性兜底) — fund 60.7→60.7 · consensus 24.2→31.9
+
+⚠️  未检测到当前快照可用的 agent_analysis.json · 将使用脚本骨架生成 synthesis
+   原因: agent_analysis.json 缺失
+   提示: Claude agent 应在 stage1 之后写入 .cache/02331.HK/agent_analysis.json
+   然后再调用 stage2() · 这样报告质量会显著提升
+
+⚖ Task 4 · 综合研判
+
+  🎯 v2.7 风格识别: balanced (中性兜底) — fund 60.7→60.7 · consensus 24.2→31.9
+  data_gaps: 3 项 · 已 ack 0
+  综合评分: 49.2/100 · 谨慎 · 3 派看空
+  agent_reviewed: False
+
+📄 Task 5 · 报告组装
+✗ Self-Review · 02331.HK (H)
+  critical=3 warning=1 info=0
+  reviewed_at=2026-10-23T20:51:36
+
+  🔴 CRITICAL (3):
+    [12_capital_flow] 维度 12_capital_flow data 为空
+      evidence: _timeout=False, error=
+      fix: agent 用 WebSearch / mx_api / 手工查权威源补齐，写入 agent_analysis.dim_commentary
+    [17_sentiment] 维度 17_sentiment data 为空
+      evidence: _timeout=False, error=
+      fix: agent 用 WebSearch / mx_api / 手工查权威源补齐，写入 agent_analysis.dim_commentary
+    [18_trap] 维度 18_trap data 为空
+      evidence: _timeout=False, error=
+      fix: agent 用 WebSearch / mx_api / 手工查权威源补齐，写入 agent_analysis.dim_commentary
+  🟡 WARNING (1):
+    [agent_analysis] agent_analysis.json 不存在（lite/CLI 直跑模式可接受）
+      evidence: file not found
+      fix: CLI 直跑无 agent 环境可以忽略此项；若走 Claude Code/Codex/Cursor 则 agent 必须读 panel.json + raw_data.json 后写 agent_analysis.json
+⚠️  [run.py] pipeline 异常 · 回退 legacy: RuntimeError: ⛔ BLOCKED by self-review: 02331.HK 有 3 个 critical 问题待修。
+→ 读 .cache/02331.HK/_review_issues.json
+→ 对每
+Traceback (most recent call last):
+  File "D:\Projects\UZI-Skill\run.py", line 725, in main
+    run_pipeline(args.ticker, resume=not args.no_resume)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Projects\UZI-Skill\skills\deep-analysis\scripts\lib\pipeline\run.py", line 66, in run_pipeline
+    return synthesize_and_render(ticker)
+  File "D:\Projects\UZI-Skill\skills\deep-analysis\scripts\lib\pipeline\synthesize.py", line 19, in synthesize_and_render
+    return rrt.stage2(ticker)
+           ~~~~~~~~~~^^^^^^^^
+  File "D:\Projects\UZI-Skill\skills\deep-analysis\scripts\run_real_test.py", line 872, in stage2
+    out = assemble(ti.full)
+  File "D:\Projects\UZI-Skill\skills\deep-analysis\scripts\assemble_report.py", line 386, in assemble
+    raise RuntimeError(
+    ...<5 lines>...
+    )
+RuntimeError: ⛔ BLOCKED by self-review: 02331.HK 有 3 个 critical 问题待修。
+→ 读 .cache/02331.HK/_review_issues.json
+→ 对每条 critical issue 执行 suggested_fix（agent 补数据 / 重跑 stage2 / 写 agent_analysis）
+→ 全部修完后重跑 assemble_report。
+→ 如需强制跳过（仅调试）：export UZI_SKIP_REVIEW=1
+
+🌐 网络预检 (7/9 通 · 均延迟 68ms · proxy=no)
+  [国内 3/3]
+    ✓   36ms  push2.eastmoney.com              · 东财 push2 · A 股行情主源
+    ✓   22ms  www.cninfo.com.cn                · 巨潮 cninfo · 公告/行业 PE
+    ✓   38ms  stock.xueqiu.com                 · 雪球数据
+  [境外 2/3]
+    ✓  221ms  query1.finance.yahoo.com         · Yahoo Finance · 美股数据
+    ✗ timeout > 3.0s  api.coingecko.com                · CoinGecko · 加密市场流动性
+    ✓   13ms  baike.baidu.com                  · 百度百科 · 公司词条（国内直连但海外代理可能反被拦）
+  [搜索 2/3]
+    ✗ timeout > 3.0s  duckduckgo.com                   · DuckDuckGo · ddgs
+    ✓   23ms  www.baidu.com                    · 百度搜索
+    ✓  125ms  api.github.com                   · GitHub API · 通用网络健康度
+
+  ✓ 全网通畅 · Playwright 可抓境内+境外所有源
+  ⚠ 检测到本地代理运行（Clash Verge）但 env 未设 HTTPS_PROXY · 脚本默认不走代理 · 若海外源不通请：
+   export HTTPS_PROXY=http://127.0.0.1:7897 && export HTTP_PROXY=http://127.0.0.1:7897
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 TARGET: 02331.HK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 Task 1 · 数据采集
+  [wave 1] fetch_basic ... ✓ (14.5s)
+  [wave 2] 19/19 fetchers parallel (max_workers=6, per-fetcher 90s)...
+   ⚠️  检测到上次 mini_racer 崩溃记录 · 自动跳过 industry/capital_flow/valuation 中的 cninfo/lg 调用
+   ℹ️  想重试 · `rm C:\Users\CXH\.uzi-skill\_minirackercrash.sentinel` 或 `UZI_FORCE_MINI_RACER=1`
+    ✗ 7_industry         (  0.0s) mini_racer disabled · crashes V8 on macOS Py 3.12/3.13
+    ✓ 5_chain            (  0.0s)
+    ✓ 6_research         (  0.0s)
+    ✓ 9_futures          (  0.0s)
+    ✓ 8_materials        (  0.0s)
+    ✗ 12_capital_flow    (  0.0s) mini_racer disabled · crashes V8 on macOS Py 3.12/3.13
+    ✓ 2_kline            (  0.1s)
+    ✓ 11_governance      (  0.0s)
+    ✓ 4_peers            (  0.1s)
+    ✓ 16_lhb             (  0.0s)
+    ✓ 13_policy          (  0.0s)
+    ✓ 10_valuation       (  0.0s)
+    ✓ 15_events          (  0.0s)
+    ✓ 3_macro            (  0.0s)
+    ✓ 14_moat            (  0.1s)
+    ✓ 1_financials       (  0.4s)
+    ✓ 19_contests        (  1.3s)
+    ✓ 17_sentiment       ( 25.7s)
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+    ✓ 18_trap            ( 93.8s)
+  [wave 2] done in 93.9s
+  [wave 3] bonus fetchers parallel ...
+    ✓ fund_managers: 0
+    ✓ similar_stocks: 0
+  [wave 3] done in 0.0s
+
+  Task 1 total: 108.4s (wave1 108.4s + wave2 93.9s + wave3 0.0s)
+
+[data_integrity] ✅ OK coverage=94.0% (17/18)
+  🟡 optional missing (1):
+     - 行业增速 (7_industry.growth)
+  ⚠️  fallback dims: 7_industry, 6_research, 8_materials, 12_capital_flow, 19_contests
+
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+⚠️  检测到 1 个数据缺口 (0 critical)
+   恢复任务清单: .cache/02331.HK/_data_gaps.json
+   Agent 必须尝试用以下手段补齐（按优先级）:
+     1. Chrome/Playwright MCP 访问 xueqiu/eastmoney
+     2. MX API (若 MX_APIKEY 已设置)
+     3. WebSearch 精确到代码
+     4. 已有数据逻辑推导
+   仍拿不到的字段 → 在 agent_analysis.json 显式标 data_gap_acknowledged
+   HTML 报告会对这些字段显示 ⚠️ 橙色徽章而非假数据
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+
+🤖 v2.6.1 · 自动兜底补齐定性维度空字段（MX → ddgs）...
+   ✓ 3_macro        via mx_api: 大宗商品(000979.SH)(指数)的区间涨跌幅、区间成交量等；大宗商品(000979.SH)(指数)的BOLL布林线…
+   ✓ 7_industry     via mx_api: PTA主连的开盘价、收盘价等；PTA主连当前的换手率、是否涨停等
+   ⚠️ 8_materials    兜底失败 · agent 应主动 web search 补抓
+   ⚠️ 9_futures      兜底失败 · agent 应主动 web search 补抓
+   ⚠️ 13_policy      兜底失败 · agent 应主动 web search 补抓
+   合计 · 充足 1 · 兜底成功 2 · 失败 3（共 6 维）
+
+🏛  Task 1.5 · 机构级财务建模 (Dims 20-22)
+  DCF: ¥38.14 · 安全边际 198.2% · 🟢 深度低估 — 安全边际充足
+  LBO: IRR 21.7% · 🟢 PE 买方可赚 20%+ IRR
+  首次覆盖: 买入 (Overweight) · TP ¥38.14 (198.2%)
+  IC Memo: ⚪ 观望 (HOLD)
+  BCG: Dog (瘦狗) · 行业吸引力 35.0%
+
+📏 Task 2 · 22 维打分
+  基本面得分: 60.7/100
+
+🎭 Task 3 · 评委规则引擎（骨架分）
+  参与 35 · 跳过 29 · 看多 5 · 中性 8 · 看空 22
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 Stage 1 建模与评分完成 · 骨架分已生成
+   数据: .cache/02331.HK/raw_data.json
+   评分: .cache/02331.HK/dimensions.json
+   评委: .cache/02331.HK/panel.json
+   输入指纹: 10e366155e30150880a1228f14ea8d268f3d00cfb690479e61299a56c5856b48
+
+   ⏸️  deep 档此时应由 agent 介入 role-play：
+      1. 读取 panel.json 中 66 人的骨架分
+      2. 按流派分析并覆盖 headline/reasoning/score
+      3. 写 .cache/02331.HK/agent_analysis.json，设置 agent_reviewed: true
+      4. 调用 stage2('02331.HK') 生成最终报告
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️  未检测到当前快照可用的 agent_analysis.json · 将使用脚本骨架生成 synthesis
+   原因: agent_analysis.json 缺失
+   提示: Claude agent 应在 stage1 之后写入 .cache/02331.HK/agent_analysis.json
+   然后再调用 stage2() · 这样报告质量会显著提升
+
+⚖ Task 4 · 综合研判
+
+  🎯 v2.7 风格识别: balanced (中性兜底) — fund 60.7→60.7 · consensus 24.4→31.9
+  综合评分: 49.2/100 · 谨慎 · 3 派看空
+  agent_reviewed: False
+
+📄 Task 5 · 报告组装
+✓ Self-Review · 02331.HK (H)
+  critical=0 warning=1 info=0
+  reviewed_at=2026-10-23T20:53:34
+
+  🟡 WARNING (1):
+    [agent_analysis] agent_analysis.json 不存在（lite/CLI 直跑模式可接受）
+      evidence: file not found
+      fix: CLI 直跑无 agent 环境可以忽略此项；若走 Claude Code/Codex/Cursor 则 agent 必须读 panel.json + raw_data.json 后写 agent_analysis.json
+⚠  02331.HK: 1 warning 已记录，继续生成 HTML
+[ok] Report assembled: reports\02331.HK_20261023\full-report.html
+  → reports\02331.HK_20261023\full-report.html
+[ok] standalone report: reports\02331.HK_20261023\full-report-standalone.html
+     inlined 142 avatar refs
+     size: 696,722 bytes (680 KB)
+[ok] share-card.png: reports\02331.HK_20261023\share-card.png
+  ✓ 朋友圈分享卡 PNG
+[ok] war-report.png: reports\02331.HK_20261023\war-report.png
+  ✓ 战报横图 PNG
+
+✅ Stage 2 完成!
+   报告: D:\Projects\UZI-Skill\skills\deep-analysis\scripts\reports\02331.HK_20261023\full-report-standalone.html
+   大小: 730 KB
+
+🎯 完整流程结束 · 报告: D:\Projects\UZI-Skill\skills\deep-analysis\scripts\reports\02331.HK_20261023\full-report-standalone.html
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📄 报告路径: D:\Projects\UZI-Skill\skills\deep-analysis\scripts\reports\02331.HK_20261023\full-report-standalone.html
+   大小: 730 KB
+
+💡 提示: 当前环境无法打开浏览器
+   方式 1: 下载文件到本地打开
+   方式 2: python run.py 02331.HK --remote  ← 生成公网链接，手机就能看
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 完成!

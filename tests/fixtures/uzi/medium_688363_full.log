@@ -1,0 +1,117 @@
+
+📊 标准分析 · depth=medium · 预计 5-8 分钟
+  · fetchers: 20/20 维
+  · 评委: 51 位
+  · 机构方法: 17 种
+  · ddgs 预算: 30
+  · fund_holders: 头部 20 家完整
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 游资（UZI）Skills v3.9.4 · 深度分析引擎
+   目标: 688363.SH
+   环境: 本地
+   浏览器: ✗ (headless)
+   Cloudflare: ✗ 未安装
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔑 MX_APIKEY 已设置 · 将优先使用东财妙想 API
+🔄 --no-resume · 强制重抓所有 22 个 fetcher
+🚀 [run.py] v3.0.0 pipeline · 默认路径
+🚀 [pipeline.run] collect · 688363.SH
+  [pipeline] wave 1 · 0_basiclogin success!
+    ok      0_basic              partial
+  [pipeline] wave 1 完成 (118.6s)
+  [pipeline] wave 2 · 17 fetcher (max_workers=6)
+  0%|          | 0/3 [00:00<?, ?it/s] 33%|███▎      | 1/3 [00:00<00:00,  3.28it/s] 67%|██████▋   | 2/3 [00:00<00:00,  4.09it/s]  0%|          | 0/10 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00,  4.50it/s]                                               0%|          | 0/9 [00:00<?, ?it/s] 70%|███████   | 7/10 [00:00<00:00, 67.06it/s]                                               11%|█         | 1/9 [00:00<00:02,  3.56it/s] 22%|██▏       | 2/9 [00:00<00:01,  3.95it/s] 33%|███▎      | 3/9 [00:00<00:01,  4.50it/s] 44%|████▍     | 4/9 [00:00<00:01,  4.96it/s] 56%|█████▌    | 5/9 [00:01<00:00,  5.40it/s] 67%|██████▋   | 6/9 [00:01<00:00,  5.55it/s] 78%|███████▊  | 7/9 [00:01<00:00,  5.76it/s] 89%|████████▉ | 8/9 [00:01<00:00,  6.04it/s]100%|██████████| 9/9 [00:01<00:00,  6.07it/s]                                               0%|          | 0/7 [00:00<?, ?it/s] 14%|█▍        | 1/7 [00:00<00:02,  2.32it/s] 29%|██▊       | 2/7 [00:01<00:03,  1.59it/s] 43%|████▎     | 3/7 [00:01<00:02,  1.76it/s] 57%|█████▋    | 4/7 [00:02<00:02,  1.48it/s] 71%|███████▏  | 5/7 [00:03<00:01,  1.19it/s] 86%|████████▌ | 6/7 [00:04<00:00,  1.19it/s]100%|██████████| 7/7 [00:05<00:00,  1.28it/s]                                               0%|          | 0/8 [00:00<?, ?it/s] 12%|█▎        | 1/8 [00:00<00:04,  1.65it/s] 25%|██▌       | 2/8 [00:00<00:02,  2.21it/s] 38%|███▊      | 3/8 [00:01<00:02,  2.03it/s] 50%|█████     | 4/8 [00:01<00:01,  2.06it/s] 62%|██████▎   | 5/8 [00:02<00:01,  1.85it/s] 75%|███████▌  | 6/8 [00:03<00:01,  1.74it/s] 88%|████████▊ | 7/8 [00:04<00:00,  1.58it/s]100%|██████████| 8/8 [00:04<00:00,  1.58it/s]                                               0%|          | 0/5 [00:00<?, ?it/s] 20%|██        | 1/5 [00:00<00:03,  1.01it/s] 40%|████      | 2/5 [00:01<00:02,  1.50it/s] 60%|██████    | 3/5 [00:01<00:01,  1.81it/s] 80%|████████  | 4/5 [00:02<00:00,  1.73it/s]100%|██████████| 5/5 [00:03<00:00,  1.56it/s]                                             login success!
+login success!
+  0%|          | 0/9 [00:00<?, ?it/s]login success!
+ 11%|█         | 1/9 [00:00<00:01,  5.70it/s] 22%|██▏       | 2/9 [00:00<00:01,  6.84it/s] 33%|███▎      | 3/9 [00:00<00:01,  5.58it/s] 44%|████▍     | 4/9 [00:00<00:00,  5.26it/s] 56%|█████▌    | 5/9 [00:00<00:00,  5.29it/s] 67%|██████▋   | 6/9 [00:01<00:00,  5.25it/s] 78%|███████▊  | 7/9 [00:01<00:00,  5.43it/s] 89%|████████▉ | 8/9 [00:01<00:00,  5.45it/s]100%|██████████| 9/9 [00:01<00:00,  5.34it/s]                                               0%|          | 0/7 [00:00<?, ?it/s] 14%|█▍        | 1/7 [00:00<00:02,  2.84it/s] 29%|██▊       | 2/7 [00:00<00:01,  3.19it/s] 43%|████▎     | 3/7 [00:01<00:01,  2.84it/s] 57%|█████▋    | 4/7 [00:01<00:00,  3.18it/s] 71%|███████▏  | 5/7 [00:01<00:00,  3.42it/s] 86%|████████▌ | 6/7 [00:01<00:00,  3.21it/s]100%|██████████| 7/7 [00:02<00:00,  3.15it/s]                                               0%|          | 0/8 [00:00<?, ?it/s] 12%|█▎        | 1/8 [00:00<00:01,  4.45it/s]login success!
+ 25%|██▌       | 2/8 [00:00<00:01,  3.91it/s] 38%|███▊      | 3/8 [00:00<00:01,  4.06it/s] 50%|█████     | 4/8 [00:00<00:00,  4.42it/s] 62%|██████▎   | 5/8 [00:01<00:00,  4.53it/s] 75%|███████▌  | 6/8 [00:01<00:00,  4.30it/s] 88%|████████▊ | 7/8 [00:01<00:00,  4.24it/s]100%|██████████| 8/8 [00:01<00:00,  4.19it/s]                                             login success!
+login success!
+  0%|          | 0/1 [00:00<?, ?it/s]100%|██████████| 1/1 [00:00<00:00,  4.20it/s]                                               0%|          | 0/4 [00:00<?, ?it/s] 25%|██▌       | 1/4 [00:00<00:00,  4.53it/s] 50%|█████     | 2/4 [00:00<00:00,  3.74it/s] 75%|███████▌  | 3/4 [00:00<00:00,  3.86it/s]100%|██████████| 4/4 [00:00<00:00,  4.04it/s]                                               0%|          | 0/3 [00:00<?, ?it/s] 33%|███▎      | 1/3 [00:00<00:00,  4.05it/s] 67%|██████▋   | 2/3 [00:00<00:00,  2.85it/s]100%|██████████| 3/3 [00:01<00:00,  2.90it/s]                                             login success!
+login success!
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+h2 connection driver error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+login success!
+    ok      6_research           full
+    ok      5_chain              partial
+    ok      2_kline              partial
+    ok      1_financials         partial
+    ok      6_fund_holders       full
+    ok      11_governance        partial
+    ok      4_peers              partial
+    ok      8_materials          partial
+    ok      14_moat              partial
+    ok      10_valuation         full
+    ok      19_contests          partial
+    ok      16_lhb               partial
+    ok      15_events            partial
+    ok      12_capital_flow      full
+    ok      similar_stocks       partial
+    ok      17_sentiment         full
+    ok      18_trap              partial
+  [pipeline] wave 3 · 4 dependent fetcher
+    ok      13_policy            partial
+    ok      3_macro              partial
+    ok      7_industry           partial
+    ok      9_futures            partial
+  [pipeline] collect 完成 · 464.9s
+✅ [pipeline.run] raw_data.json 已写 · 进入 scoring 段（v3.0 纯函数编排）
+   ✓ 3_macro        via mx_api: 大宗商品(000979.SH)(指数)的区间涨跌幅、区间成交量等；大宗商品(000979.SH)(指数)的BOLL布林线…
+   ⚠️ 8_materials    兜底失败 · agent 应主动 web search 补抓
+   ⚠️ 9_futures      兜底失败 · agent 应主动 web search 补抓
+   合计 · 充足 3 · 兜底成功 1 · 失败 2（共 6 维）
+   ℹ️  Playwright skip · profile=medium · opt-in 未启用 · export UZI_PLAYWRIGHT_ENABLE=1 启用后重跑
+
+  🎯 v2.7 风格识别: balanced (中性兜底) — fund 57.5→57.5 · consensus 28.6→35.8
+
+⚠️  未检测到当前快照可用的 agent_analysis.json · 将使用脚本骨架生成 synthesis
+   原因: agent_analysis.json 缺失
+   提示: Claude agent 应在 stage1 之后写入 .cache/688363.SH/agent_analysis.json
+   然后再调用 stage2() · 这样报告质量会显著提升
+
+⚖ Task 4 · 综合研判
+
+  🎯 v2.7 风格识别: balanced (中性兜底) — fund 57.5→57.5 · consensus 28.6→35.8
+  data_gaps: 2 项 · 已 ack 0
+  综合评分: 48.8/100 · 谨慎 · 5 派看空
+  agent_reviewed: False
+
+📄 Task 5 · 报告组装
+✓ Self-Review · 688363.SH (A)
+  critical=0 warning=3 info=0
+  reviewed_at=2026-10-30T22:20:29
+
+  🟡 WARNING (3):
+    [review-engine] check check_industry_mapping_sanity 自己炸了: TypeError: argument of type 'NoneType' is not iterable
+    [review-engine] check check_metals_materials_populated 自己炸了: TypeError: argument of type 'NoneType' is not iterable
+    [agent_analysis] agent_analysis.json 不存在（lite/CLI 直跑模式可接受）
+      evidence: file not found
+      fix: CLI 直跑无 agent 环境可以忽略此项；若走 Claude Code/Codex/Cursor 则 agent 必须读 panel.json + raw_data.json 后写 agent_analysis.json
+⚠  688363.SH: 3 warning 已记录，继续生成 HTML
+[ok] Report assembled: reports\688363.SH_20261030\full-report.html
+  → reports\688363.SH_20261030\full-report.html
+[ok] standalone report: reports\688363.SH_20261030\full-report-standalone.html
+     inlined 141 avatar refs
+     size: 755,917 bytes (738 KB)
+[ok] share-card.png: reports\688363.SH_20261030\share-card.png
+  ✓ 朋友圈分享卡 PNG
+[ok] war-report.png: reports\688363.SH_20261030\war-report.png
+  ✓ 战报横图 PNG
+
+✅ Stage 2 完成!
+   报告: D:\Projects\UZI-Skill\skills\deep-analysis\scripts\reports\688363.SH_20261030\full-report-standalone.html
+   大小: 794 KB
+   → 走 pipeline · skip legacy stage1/stage2
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📄 报告路径: D:\Projects\UZI-Skill\skills\deep-analysis\scripts\reports\688363.SH_20261030\full-report-standalone.html
+   大小: 794 KB
+
+💡 提示: 当前环境无法打开浏览器
+   方式 1: 下载文件到本地打开
+   方式 2: python run.py 688363.SH --remote  ← 生成公网链接，手机就能看
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 完成!
