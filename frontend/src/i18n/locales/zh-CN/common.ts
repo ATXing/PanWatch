@@ -49,6 +49,8 @@ export const common = {
   links: {
     github: 'GitHub 项目',
     logs: '查看日志',
+    tonghuashun: '同花顺',
+    tonghuashunHint: '在同花顺查看 {{name}}',
   },
   update: {
     title: '发现新版本',

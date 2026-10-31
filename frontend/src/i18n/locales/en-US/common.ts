@@ -52,6 +52,8 @@ export const common = {
   links: {
     github: 'GitHub repository',
     logs: 'View logs',
+    tonghuashun: 'Tonghuashun',
+    tonghuashunHint: 'View {{name}} on Tonghuashun',
   },
   update: {
     title: 'Update available',
