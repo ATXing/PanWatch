@@ -1,7 +1,7 @@
 import { useConfirm } from '@panwatch/base-ui/components/ui/confirm-dialog'
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Plus, Trash2, Pencil, Search, X, TrendingUp, Bot, Play, RefreshCw, Wallet, PiggyBank, ArrowUpRight, ArrowDownRight, Building2, ChevronDown, ChevronRight, Cpu, Bell, Clock, Newspaper, ExternalLink, BarChart3, Brain } from 'lucide-react'
+import { Plus, Trash2, Pencil, Search, X, TrendingUp, Bot, Play, RefreshCw, Wallet, PiggyBank, ArrowUpRight, ArrowDownRight, Building2, ChevronDown, ChevronRight, Cpu, Bell, Clock, Newspaper, ExternalLink, BarChart3, Brain, Eye, EyeOff } from 'lucide-react'
 import { fetchAPI, stocksApi, insightApi, tradingAgentsApi, type AIService, type NotifyChannel, type UziListItem } from '@panwatch/api'
 import { klinesApi } from '@panwatch/api/klines'
 import { useLocalStorage } from '@/lib/utils'
@@ -285,6 +285,8 @@ export default function StocksPage() {
 
   type ViewTab = 'positions' | 'watchlist'
   const [savedViewTab, setViewTab] = useLocalStorage<ViewTab>('panwatch_stocks_viewTab', 'positions')
+  // 隐私开关：隐藏上方汇总卡金额（真实数字不渲染进 DOM，截图/复制安全）
+  const [privacyHidden, setPrivacyHidden] = useLocalStorage('panwatch_stocks_privacyHidden', false)
 
   // 建议池建议（来自 /suggestions API）
   const [poolSuggestions, setPoolSuggestions] = useState<Record<string, PoolSuggestion>>({})
@@ -1434,6 +1436,8 @@ export default function StocksPage() {
   }
 
   // ========== Helpers ==========
+  // 隐私打码：只用于上方汇总卡（formatMoney 仍被持仓明细列表使用，不能全局打码）
+  const maskVal = (text: string) => (privacyHidden ? '••••' : text)
   const formatMoney = (value: number) => {
     if (Math.abs(value) >= 10000) {
       return `${(value / 10000).toFixed(2)}${stockT('stocksPage.largeUnit')}`
@@ -1639,7 +1643,19 @@ export default function StocksPage() {
       {/* Header */}
       <div className="flex flex-col gap-2 md:gap-3 mb-5 md:mb-6">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-[18px] md:text-[22px] font-bold text-foreground tracking-tight shrink-0">{stockT('stocksPage.messages.portfolio')}</h1>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <h1 className="text-[18px] md:text-[22px] font-bold text-foreground tracking-tight">{stockT('stocksPage.messages.portfolio')}</h1>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground"
+              aria-label={stockT('stocksPage.messages.privacyToggle')}
+              title={stockT('stocksPage.messages.privacyToggle')}
+              onClick={() => setPrivacyHidden(!privacyHidden)}
+            >
+              {privacyHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </Button>
+          </div>
           {/* Desktop buttons + controls */}
           <div className="hidden md:flex items-center gap-3">
             {/* Controls */}
@@ -1741,14 +1757,14 @@ export default function StocksPage() {
           ))}
         </div>
       ) : portfolio ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+        <div data-testid="portfolio-summary" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
           <div className="card p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-1">
               <TrendingUp className="w-4 h-4" />
               <span className="text-[12px]">{stockT('stocksPage.messages.totalMarketValue')}</span>
             </div>
             <div className="text-[20px] font-bold text-foreground font-mono">
-              {portfolioTotalsReady ? formatMoney(portfolio.total.total_market_value) : '--'}
+              {portfolioTotalsReady ? maskVal(formatMoney(portfolio.total.total_market_value)) : '--'}
             </div>
           </div>
           <div className="card p-4">
@@ -1761,13 +1777,13 @@ export default function StocksPage() {
               <span className="text-[12px]">{stockT('stocksPage.messages.totalPnl')}</span>
             </div>
             <div className={`text-[20px] font-bold font-mono ${marketSignTextClass(portfolioTotalsReady ? portfolio.total.total_pnl : null)}`}>
-              {portfolioTotalsReady ? `${portfolio.total.total_pnl >= 0 ? '+' : ''}${formatMoney(portfolio.total.total_pnl)}` : '--'}
+              {portfolioTotalsReady ? maskVal(`${portfolio.total.total_pnl >= 0 ? '+' : ''}${formatMoney(portfolio.total.total_pnl)}`) : '--'}
               {portfolioTotalsReady && <span className="block text-[13px] md:inline md:ml-1.5">
-                ({portfolio.total.total_pnl_pct >= 0 ? '+' : ''}{portfolio.total.total_pnl_pct.toFixed(2)}%)
+                ({maskVal(`${portfolio.total.total_pnl_pct >= 0 ? '+' : ''}${portfolio.total.total_pnl_pct.toFixed(2)}%`)})
               </span>}
               {portfolioTotalsReady && portfolio.total.total_net_pnl != null && (
                 <span className="block text-[13px] md:inline md:ml-1.5">
-                  净 {portfolio.total.total_net_pnl >= 0 ? '+' : ''}{formatMoney(portfolio.total.total_net_pnl)} ({portfolio.total.total_net_pnl_pct != null ? `${portfolio.total.total_net_pnl_pct >= 0 ? '+' : ''}${portfolio.total.total_net_pnl_pct.toFixed(2)}%` : ''})
+                  净 {maskVal(`${portfolio.total.total_net_pnl >= 0 ? '+' : ''}${formatMoney(portfolio.total.total_net_pnl)}`)} ({portfolio.total.total_net_pnl_pct != null ? maskVal(`${portfolio.total.total_net_pnl_pct >= 0 ? '+' : ''}${portfolio.total.total_net_pnl_pct.toFixed(2)}%`) : ''})
                 </span>
               )}
             </div>
@@ -1790,8 +1806,8 @@ export default function StocksPage() {
                   <span className="text-[12px]">{stockT('stocksPage.messages.todayPnl')}</span>
                 </div>
                 <div className={`text-[20px] font-bold font-mono ${marketSignTextClass(portfolioTotalsReady ? dayPnl : null)}`}>
-                  {portfolioTotalsReady ? `${isUp ? '+' : ''}${formatMoney(dayPnl)}` : '--'}
-                  {portfolioTotalsReady && <span className="block text-[13px] md:inline md:ml-1.5">({pct >= 0 ? '+' : ''}{pct.toFixed(2)}%)</span>}
+                  {portfolioTotalsReady ? maskVal(`${isUp ? '+' : ''}${formatMoney(dayPnl)}`) : '--'}
+                  {portfolioTotalsReady && <span className="block text-[13px] md:inline md:ml-1.5">({maskVal(`${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`)})</span>}
                 </div>
               </div>
             )
@@ -1803,7 +1819,7 @@ export default function StocksPage() {
               <span className="text-[12px]">{stockT('stocksPage.messages.availableFundsShort')}</span>
             </div>
             <div className="text-[20px] font-bold text-foreground font-mono">
-              {formatMoney(portfolio.total.available_funds)}
+              {maskVal(formatMoney(portfolio.total.available_funds))}
             </div>
           </div>
           <div className="card p-4">
@@ -1812,7 +1828,7 @@ export default function StocksPage() {
               <span className="text-[12px]">{stockT('stocksPage.messages.totalAssets')}</span>
             </div>
             <div className="text-[20px] font-bold text-foreground font-mono">
-              {portfolioTotalsReady ? formatMoney(portfolio.total.total_assets) : '--'}
+              {portfolioTotalsReady ? maskVal(formatMoney(portfolio.total.total_assets)) : '--'}
             </div>
           </div>
 
@@ -1822,10 +1838,10 @@ export default function StocksPage() {
               <span className="text-[12px]">{stockT('stocksPage.messages.positionRatio')}</span>
             </div>
             <div className="text-[20px] font-bold text-foreground font-mono">
-              {positionRatio ? `${positionRatio.pct.toFixed(1)}%` : '--'}
+              {positionRatio ? maskVal(`${positionRatio.pct.toFixed(1)}%`) : '--'}
             </div>
             <div className="mt-1 text-[11px] text-muted-foreground line-clamp-1">
-              {positionRatio ? stockT('stocksPage.messages.positionValueSummary', { value: formatMoney(positionRatio.mv), assets: formatMoney(positionRatio.assets) }) : stockT('stocksPage.messages.empty')}
+              {positionRatio ? maskVal(stockT('stocksPage.messages.positionValueSummary', { value: formatMoney(positionRatio.mv), assets: formatMoney(positionRatio.assets) })) : stockT('stocksPage.messages.empty')}
             </div>
           </div>
         </div>
