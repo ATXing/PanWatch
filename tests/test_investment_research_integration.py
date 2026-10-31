@@ -53,7 +53,9 @@ def configure(engine, name, mode="langgraph", **policy):
     with Session(engine) as db, db.begin():
         db.add(AgentConfig(name=name, display_name=name, enabled=False, config={"research_graph": {
             "engine": mode, "template": "custom_research", "specialists": ["technical", "flow", "events"], "max_attempts": 25,
-            "max_total_tokens": 250000, **policy}}))
+            # 每次尝试预留 = 输入估算 + max_output_tokens，而后者随标的数放大（1536/票），
+            # 3 只标的约 19k/次；250000 只够约 13 次，跑不完一整轮深研，故留到 500000。
+            "max_total_tokens": 500000, **policy}}))
 
 
 async def collected(context):

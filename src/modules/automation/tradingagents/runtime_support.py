@@ -28,7 +28,6 @@ __all__ = [
     "apply_compat_patches",
     "build_ta_llm_config",
     "bounded_tier_clients",
-    "build_ta_llm_config",
     "configure_yfinance_proxy",
     "resolve_yfinance_proxy",
 ]
