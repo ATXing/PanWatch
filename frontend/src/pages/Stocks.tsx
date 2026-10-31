@@ -2216,41 +2216,41 @@ export default function StocksPage() {
                                   <td title={quoteHint(pos)} className={`px-4 py-2.5 text-right font-mono text-[12px] ${changeColor}`}>
                                     {pos.change_pct != null ? `${pos.change_pct >= 0 ? '+' : ''}${pos.change_pct.toFixed(2)}%` : '—'}
                                   </td>
-                                  <td className="px-4 py-2.5 text-right font-mono text-[12px] text-muted-foreground">{formatPrice(pos.cost_price)}</td>
-                                  <td className="px-4 py-2.5 text-right font-mono text-[12px] text-muted-foreground">{pos.quantity}</td>
+                                  <td className="px-4 py-2.5 text-right font-mono text-[12px] text-muted-foreground">{maskVal(formatPrice(pos.cost_price))}</td>
+                                  <td className="px-4 py-2.5 text-right font-mono text-[12px] text-muted-foreground">{maskVal(String(pos.quantity))}</td>
                                   <td className="px-4 py-2.5 text-right font-mono text-[12px] text-muted-foreground">
                                     {pos.market_value != null ? (
                                       <div className="flex flex-col items-end">
                                         {isForeign ? (
                                           <>
-                                            <span>{formatMoney(pos.market_value)} {pos.market === 'HK' ? 'HKD' : 'USD'}</span>
-                                            {pos.market_value_cny && <span className="text-[10px] text-muted-foreground/60">≈{formatMoney(pos.market_value_cny)}</span>}
+                                            <span>{maskVal(formatMoney(pos.market_value))} {pos.market === 'HK' ? 'HKD' : 'USD'}</span>
+                                            {pos.market_value_cny && <span className="text-[10px] text-muted-foreground/60">≈{maskVal(formatMoney(pos.market_value_cny))}</span>}
                                           </>
-                                        ) : <span>{formatMoney(pos.market_value)}</span>}
+                                        ) : <span>{maskVal(formatMoney(pos.market_value))}</span>}
                                       </div>
                                     ) : '—'}
                                   </td>
                                   <td className={`px-4 py-2.5 text-right font-mono text-[12px] ${pnlColor}`}>
                                     {pos.pnl != null ? (
                                       <div className="flex flex-col items-end">
-                                        <span>{pos.pnl >= 0 ? '+' : ''}{formatMoney(pos.pnl)}</span>
-                                        <span className="text-[10px] opacity-70">{pos.pnl_pct != null ? `${pos.pnl_pct >= 0 ? '+' : ''}${pos.pnl_pct.toFixed(2)}%` : ''}{isForeign && ' CNY'}</span>
+                                        <span>{maskVal(`${pos.pnl >= 0 ? '+' : ''}${formatMoney(pos.pnl)}`)}</span>
+                                        <span className="text-[10px] opacity-70">{pos.pnl_pct != null ? maskVal(`${pos.pnl_pct >= 0 ? '+' : ''}${pos.pnl_pct.toFixed(2)}%`) : ''}{isForeign && ' CNY'}</span>
                                       </div>
                                     ) : '—'}
                                   </td>
-                                  <td className="px-4 py-2.5 text-right font-mono text-[12px]" title={pos.net_pnl != null ? `净盈亏（含费口径）：市值 - 含买入费成本 - 预估卖出费` + (pos.net_cost_price != null ? ` · 含费成本价 ${formatPrice(pos.net_cost_price)}${isForeign ? (pos.market === 'HK' ? ' HKD' : ' USD') : ''}` : '') + (pos.est_fees_cny != null ? ` · 预估费用 ¥${formatMoney(pos.est_fees_cny)}` : '') : undefined}>
+                                  <td className="px-4 py-2.5 text-right font-mono text-[12px]" title={pos.net_pnl != null ? maskVal(`净盈亏（含费口径）：市值 - 含买入费成本 - 预估卖出费` + (pos.net_cost_price != null ? ` · 含费成本价 ${formatPrice(pos.net_cost_price)}${isForeign ? (pos.market === 'HK' ? ' HKD' : ' USD') : ''}` : '') + (pos.est_fees_cny != null ? ` · 预估费用 ¥${formatMoney(pos.est_fees_cny)}` : '')) : undefined}>
                                     {pos.net_pnl != null ? (
                                       <div className="flex flex-col items-end">
-                                        <span className={marketSignTextClass(pos.net_pnl)}>{pos.net_pnl >= 0 ? '+' : ''}{formatMoney(pos.net_pnl)}</span>
-                                        <span className="text-[10px] opacity-70 text-muted-foreground">{pos.net_pnl_pct != null ? `${pos.net_pnl_pct >= 0 ? '+' : ''}${pos.net_pnl_pct.toFixed(2)}%` : ''}{isForeign && ' CNY'}</span>
+                                        <span className={marketSignTextClass(pos.net_pnl)}>{maskVal(`${pos.net_pnl >= 0 ? '+' : ''}${formatMoney(pos.net_pnl)}`)}</span>
+                                        <span className="text-[10px] opacity-70 text-muted-foreground">{pos.net_pnl_pct != null ? maskVal(`${pos.net_pnl_pct >= 0 ? '+' : ''}${pos.net_pnl_pct.toFixed(2)}%`) : ''}{isForeign && ' CNY'}</span>
                                       </div>
                                     ) : '—'}
                                   </td>
                                   <td className={`px-4 py-2.5 text-right font-mono text-[12px] ${marketSignTextClass(pos.daily_pnl)}`}>
                                     {pos.daily_pnl != null ? (
                                       <div className="flex flex-col items-end">
-                                        <span>{pos.daily_pnl >= 0 ? '+' : ''}{formatMoney(pos.daily_pnl)}</span>
-                                        <span className="text-[10px] opacity-70">{pos.daily_pnl_pct != null ? `${pos.daily_pnl_pct >= 0 ? '+' : ''}${pos.daily_pnl_pct.toFixed(2)}%` : ''}</span>
+                                        <span>{maskVal(`${pos.daily_pnl >= 0 ? '+' : ''}${formatMoney(pos.daily_pnl)}`)}</span>
+                                        <span className="text-[10px] opacity-70">{pos.daily_pnl_pct != null ? maskVal(`${pos.daily_pnl_pct >= 0 ? '+' : ''}${pos.daily_pnl_pct.toFixed(2)}%`) : ''}</span>
                                       </div>
                                     ) : '—'}
                                   </td>
@@ -2431,32 +2431,32 @@ export default function StocksPage() {
                               <div className="grid grid-cols-4 gap-2 text-[11px]">
                                 <div className="min-w-0">
                                   <div className="text-[10px] text-muted-foreground">{stockT('stocksPage.messages.cost')}</div>
-                                  <div className="font-mono text-foreground truncate" title={String(pos.cost_price)}>{formatPrice(pos.cost_price)}</div>
+                                  <div className="font-mono text-foreground truncate" title={maskVal(String(pos.cost_price))}>{maskVal(formatPrice(pos.cost_price))}</div>
                                 </div>
                                 <div className="min-w-0">
                                   <div className="text-[10px] text-muted-foreground">{stockT('stocksPage.messages.quantity')}</div>
-                                  <div className="font-mono text-foreground truncate" title={String(pos.quantity)}>{pos.quantity}</div>
+                                  <div className="font-mono text-foreground truncate" title={maskVal(String(pos.quantity))}>{maskVal(String(pos.quantity))}</div>
                                 </div>
                                 <div className="min-w-0">
                                   <div className="text-[10px] text-muted-foreground">{stockT('stocksPage.messages.pnl')}</div>
                                   <div className={`font-mono whitespace-nowrap ${pnlColor}`}>
-                                    {pos.pnl != null ? `${pos.pnl >= 0 ? '+' : ''}${formatMoney(pos.pnl)}` : '—'}
+                                    {pos.pnl != null ? maskVal(`${pos.pnl >= 0 ? '+' : ''}${formatMoney(pos.pnl)}`) : '—'}
                                   </div>
                                   {pos.pnl_pct != null && (
                                     <div className={`text-[10px] font-mono ${pnlColor} opacity-80`}>
-                                      {pos.pnl_pct >= 0 ? '+' : ''}{pos.pnl_pct.toFixed(2)}%
+                                      {maskVal(`${pos.pnl_pct >= 0 ? '+' : ''}${pos.pnl_pct.toFixed(2)}%`)}
                                     </div>
                                   )}
                                   {pos.net_pnl != null && (
                                     <div className={`text-[10px] font-mono ${marketSignTextClass(pos.net_pnl)} opacity-80`}>
-                                      净 {pos.net_pnl >= 0 ? '+' : ''}{formatMoney(pos.net_pnl)}
+                                      净 {maskVal(`${pos.net_pnl >= 0 ? '+' : ''}${formatMoney(pos.net_pnl)}`)}
                                     </div>
                                   )}
                                 </div>
                                 <div className="min-w-0">
                                   <div className="text-[10px] text-muted-foreground">{stockT('stocksPage.messages.today')}</div>
                                   <div className={`font-mono whitespace-nowrap ${marketSignTextClass(pos.daily_pnl)}`}>
-                                    {pos.daily_pnl != null ? `${pos.daily_pnl >= 0 ? '+' : ''}${formatMoney(pos.daily_pnl)}` : '—'}
+                                    {pos.daily_pnl != null ? maskVal(`${pos.daily_pnl >= 0 ? '+' : ''}${formatMoney(pos.daily_pnl)}`) : '—'}
                                   </div>
                                 </div>
                               </div>
