@@ -486,6 +486,74 @@ def _panel_brief(pj: dict) -> dict:
     }
 
 
+def _resolve_fundamental_score(synth: dict, fallback: float | None) -> float | None:
+    """基本面分取 synthesis 的，dimensions 的做兜底。
+
+    原因：synthesis.fundamental_score 是 dimensions 那份再经 v2.7「股票风格动态加权」
+    (score_fns.py apply_style_weights) 后的结果，而 uzi_overall = 这份 × 0.6 + 评委共识 × 0.4。
+    若存 dimensions 的原始分，页面上的「基本面 × 0.6 + 共识 × 0.4」算出来跟综合分对不上
+    (601899 实例：66.6×0.6+52.3×0.4=60.9 而实际综合 60.7；换成 66.3 才严丝合缝)，
+    还会跟 UZI HTML 报告里印的「基本面 66.3」差一截，用户会当成两套口径。
+    """
+    if isinstance(synth, dict):
+        v = synth.get("fundamental_score")
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return round(float(v), 1)
+    return fallback
+
+
+def _plan_brief(synth: dict) -> dict | None:
+    """把 synthesis.json 里的「作战计划」抽成前端能直接渲染的一小份。
+
+    背景：UZI 的 standalone HTML 里有一块「作战计划」（入场/仓位/止损/目标 + 四流派
+    买点 + 退出条件 + 情景收益），PanWatch 面板原先只搬了分数和评委，这块完全没落点。
+
+    ⚠️ 口径提醒（项目铁律）：UZI 的 buy_zones / exit_triggers **不采信、不进徽章、
+    不当买点用**。本函数只是把 UZI 原文搬到界面上可读，前端必须标注「UZI 原文，
+    非本系统信号」；本系统的入场与止损以 L5 执行层规则为准（-8% 硬止损）。
+    故这里不做任何加工/校验/重算，原样透传，缺哪块就少哪块。
+    """
+    if not isinstance(synth, dict):
+        return None
+    dash = synth.get("dashboard") or {}
+    plan = dash.get("battle_plan") or {}
+    friendly = synth.get("friendly") or {}
+    zones = synth.get("buy_zones") or {}
+
+    # 四流派买点：只保留有价格的档，rationale 一并带上（那是唯一能说明「为什么是这个价」的东西）
+    zone_rows = []
+    for key in ("value", "growth", "technical", "youzi"):
+        z = zones.get(key) or {}
+        if isinstance(z, dict) and z.get("price") not in (None, "", "—"):
+            zone_rows.append({"school": key, "price": z.get("price"), "rationale": z.get("rationale") or ""})
+
+    scenarios = friendly.get("scenarios") or {}
+    out = {
+        "core_conclusion": dash.get("core_conclusion") or "",
+        "battle_plan": {
+            "entry": plan.get("entry"),
+            "position": plan.get("position"),
+            "stop": plan.get("stop"),
+            "target": plan.get("target"),
+        },
+        "buy_zones": zone_rows,
+        "exit_triggers": [str(x) for x in (friendly.get("exit_triggers") or []) if x],
+        "scenarios": {
+            "entry_price": scenarios.get("entry_price"),
+            "cases": [
+                {"name": c.get("name"), "probability": c.get("probability"), "return": c.get("return")}
+                for c in (scenarios.get("cases") or [])
+                if isinstance(c, dict) and c.get("name")
+            ],
+        },
+        "data_view": dash.get("data_perspective") or {},
+    }
+    # 全空 → 不写库（老报告可能没有 dashboard），前端整块不渲染，不造数
+    if not any([out["core_conclusion"], out["buy_zones"], out["exit_triggers"], any(v for v in out["battle_plan"].values())]):
+        return None
+    return out
+
+
 def _ensure_table(conn: sqlite3.Connection):
     conn.execute(
         """
@@ -526,6 +594,9 @@ def _ensure_table(conn: sqlite3.Connection):
         # 2026-11-02 · 评委投票分布 + 名单精简版(见 _panel_brief)。
         # 老库没这列时留 NULL,前端整块不渲染,不补假数据。
         ("panel_json", "TEXT"),
+        # 2026-11-03 · UZI 原文的「作战计划」:入场/仓位/止损/目标 + 四流派买点 +
+        # 退出条件(见 _plan_brief)。UZI 的建议,**不采信、不进徽章**,只做可读展示。
+        ("plan_json", "TEXT"),
     ):
         if col not in cols:
             conn.execute(f"ALTER TABLE uzi_reports ADD COLUMN {col} {typ}")
@@ -644,6 +715,14 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
     consensus_valid = synth.get("consensus_valid")
     verdict_detail = synth.get("verdict_detail")
     verdict_label = synth.get("verdict_label")
+    # 基本面分以 synthesis 为准、dimensions 兜底。
+    # 原因：synthesis.fundamental_score 是 dimensions 那份再经 v2.7「股票风格动态加权」
+    # (score_fns.py apply_style_weights)后的结果，而 uzi_overall = 这份 × 0.6 + 评委共识 × 0.4。
+    # 若存 dimensions 的原始分，页面上「基本面 × 0.6 + 共识 × 0.4」算出来跟综合分对不上
+    # (601899 实例：66.6×0.6+52.3×0.4=60.9 而实际综合 60.7；换成 66.3 才严丝合缝)，
+    # 而且跟 UZI HTML 报告里印的「基本面 66.3」差一截，用户会当成两套口径。
+    score = _resolve_fundamental_score(synth, score)    # 2026-11-03 · UZI 原文「作战计划」，只做可读展示，不采信（见 _plan_brief 注释）
+    plan_brief = _plan_brief(synth)
     # 有效评委人数：synthesis 没存，panel.json 的 signal_distribution 里有
     # 2026-11-02 · 顺带把 panel.json 压成 panel_brief 存库，供前端原生渲染
     # 「投票分布 / 谁最看好 / 谁最看空」——这三块原先只存在于 share-card.png
@@ -671,8 +750,8 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                  one_liner, coverage_pct, dimensions_json, dim_status_json,
                  score_integrity_json, report_dir, html_path,
                  uzi_overall_score, panel_consensus, consensus_valid,
-                 verdict_detail, verdict_label, panel_active, panel_json, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                 verdict_detail, verdict_label, panel_active, panel_json, plan_json, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
             ON CONFLICT(symbol, market) DO UPDATE SET
                 ticker_raw=excluded.ticker_raw,
                 tier=excluded.tier,
@@ -692,6 +771,7 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                 verdict_label=excluded.verdict_label,
                 panel_active=excluded.panel_active,
                 panel_json=excluded.panel_json,
+                plan_json=excluded.plan_json,
                 created_at=CURRENT_TIMESTAMP
             """,
             (
@@ -715,6 +795,7 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                 verdict_label,
                 panel_active,
                 json.dumps(panel_brief, ensure_ascii=False) if panel_brief else None,
+                json.dumps(plan_brief, ensure_ascii=False) if plan_brief else None,
             ),
         )
         # 同步即刷新「调研完成」卡片:让 uzi_jobs 与刚写入的 uzi_reports 对齐,

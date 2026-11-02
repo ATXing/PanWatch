@@ -12,6 +12,9 @@ import {
   type UziJob,
   type UziGapPromptResult,
   type UziJobProgressResponse,
+  type UziPanel,
+  type UziPanelInvestor,
+  type UziPlan,
   type UziReport,
 } from '@panwatch/api'
 import UziProgressPanel from '@panwatch/biz-ui/components/uzi-progress-panel'
@@ -2194,6 +2197,239 @@ function DeepHistoryComparison({
   )
 }
 
+/** 单个评委一行：首字母色块 + 名字 + 评分 + 一行结论。
+ *  头像不搬 UZI 仓里的 66 个 svg（跨仓静态资源要额外做文件服务），先用名字首字，零依赖。 */
+function UziInvestorRow({ inv, tone }: { inv: UziPanelInvestor; tone: 'bull' | 'bear' }) {
+  const chipCls =
+    tone === 'bull'
+      ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
+      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+  const scoreCls = tone === 'bull' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+  return (
+    <div className="flex items-start gap-1.5">
+      <span
+        className={`mt-[1px] flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-medium ${chipCls}`}
+      >
+        {(inv.name || '?').slice(0, 1)}
+      </span>
+      <div className="min-w-0 leading-tight">
+        <div className="flex items-baseline gap-1 text-[11px]">
+          <span className="truncate">{inv.name || '—'}</span>
+          <span className={`shrink-0 font-mono ${scoreCls}`}>{inv.score ?? '—'}</span>
+        </div>
+        {inv.headline && (
+          <div className="truncate text-[10px] text-muted-foreground" title={inv.headline}>
+            {inv.headline}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** UZI 评委投票分布 + 最看好/最看空。
+ *
+ *  数据来自 panel.json 的摘要（后端 uzi_sync._panel_brief → uzi_reports.panel_json），
+ *  和 share-card.png 上「50 位大佬投票 / 谁最看好你」两块同源——那两块原先只存在于图片里，
+ *  PanWatch 看不到。老数据没有这份摘要时 panel 为 null，上层整块不渲染，不补假数据。
+ *
+ *  口径提醒：vote 是 5 档（强烈买入/买入/关注/观望/回避），signal 是 3 档
+ *  （bullish/neutral/bearish），两套计数不可混用；「有效票数」按 5 档加总。
+ */
+/** UZI 原文的「作战计划」：入场/仓位/止损/目标 + 四流派买点 + 退出条件。
+ *
+ *  ⚠️ 定位：这是 UZI 报告的原文建议，**不是本系统的交易信号**。
+ *  项目一贯口径是 UZI 只做尽调/排雷，它的 buy_zones / exit_triggers 不采信、不进徽章；
+ *  这里做可读展示，是为了省掉「翻 HTML 报告」这一步，卡片上必须保留那句免责说明。
+ *  本系统的入场与止损以 L5 执行层为准（单票 ≤3%、−8% 硬止损）。
+ */
+const UZI_SCHOOL_LABEL: Record<string, string> = {
+  value: '价值',
+  growth: '成长',
+  technical: '技术',
+  youzi: '游资',
+}
+
+function UziPlanCard({ plan }: { plan: UziPlan }) {
+  const bp = plan.battle_plan || {}
+  const zones = plan.buy_zones || []
+  const exits = plan.exit_triggers || []
+  const cases = plan.scenarios?.cases || []
+  const cells: Array<[string, string | null | undefined]> = [
+    ['入场', bp.entry],
+    ['仓位', bp.position],
+    ['止损', bp.stop],
+    ['目标', bp.target],
+  ]
+  const hasCells = cells.some(([, v]) => v)
+  if (!hasCells && zones.length === 0 && exits.length === 0) return null
+
+  return (
+    <div className="card p-3 space-y-2.5">
+      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+        <span className="text-[12px] font-medium">作战计划</span>
+        <span className="text-[10px] text-muted-foreground">
+          UZI 原文 · 非本系统信号（本系统按 −8% 硬止损执行）
+        </span>
+      </div>
+
+      {hasCells && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {cells.map(([label, val]) => (
+            <div key={label} className="rounded-md border border-border/60 bg-accent/30 px-2 py-1.5">
+              <div className="text-[10px] text-muted-foreground">{label}</div>
+              <div className="text-[12px] font-semibold tabular-nums">{val || '—'}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {zones.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] text-muted-foreground">流派买点</span>
+          {zones.map((z) => (
+            <span
+              key={z.school}
+              title={z.rationale || undefined}
+              className="rounded border border-border/60 bg-accent/40 px-1.5 py-0.5 text-[11px] tabular-nums"
+            >
+              {UZI_SCHOOL_LABEL[z.school] || z.school}{' '}
+              {typeof z.price === 'number' ? `¥${z.price}` : z.price}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {(exits.length > 0 || cases.length > 0) && (
+        <details>
+          <summary className="cursor-pointer select-none text-[10px] text-muted-foreground">
+            展开 UZI 的退出条件{exits.length > 0 ? `（${exits.length} 条）` : ''}
+            {cases.length > 0 ? ' · 情景收益' : ''}
+          </summary>
+          <div className="mt-1.5 space-y-2">
+            {exits.length > 0 && (
+              <ul className="space-y-1">
+                {exits.map((t, i) => (
+                  <li key={i} className="flex gap-1.5 text-[11px] leading-relaxed text-foreground/85">
+                    <span className="shrink-0 tabular-nums text-muted-foreground">{i + 1}.</span>
+                    <span>{t}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {cases.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {cases.map((c, i) => (
+                  <span
+                    key={i}
+                    className="rounded border border-border/60 px-1.5 py-0.5 text-[10px] tabular-nums"
+                  >
+                    {c.name} {c.probability}
+                    {c.return != null ? ` → ${c.return > 0 ? '+' : ''}${c.return}%` : ''}
+                  </span>
+                ))}
+              </div>
+            )}
+            {plan.scenarios?.entry_price != null && (
+              <div className="text-[10px] text-muted-foreground">
+                情景收益按入场价 ¥{plan.scenarios.entry_price} 测算
+              </div>
+            )}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function UziPanelBoard({ panel }: { panel: UziPanel }) {
+  const vote = panel.vote || {}
+  const rows: Array<[string, number, string]> = [
+    ['强烈买入', vote.strongly_buy ?? 0, 'bg-rose-600'],
+    ['买入', vote.buy ?? 0, 'bg-rose-400'],
+    ['关注', vote.watch ?? 0, 'bg-amber-500'],
+    ['观望', vote.wait ?? 0, 'bg-slate-400'],
+    ['回避', vote.avoid ?? 0, 'bg-emerald-600'],
+  ]
+  const maxCount = Math.max(...rows.map((r) => r[1]), 1)
+  const votedSum = rows.reduce((acc, r) => acc + r[1], 0)
+  const active = panel.active ?? votedSum
+  const voters = (panel.investors || []).filter(
+    (inv) => inv.signal === 'bullish' || inv.signal === 'neutral' || inv.signal === 'bearish'
+  )
+  const bulls = voters
+    .filter((v) => v.signal === 'bullish')
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+    .slice(0, 3)
+  const bears = voters
+    .filter((v) => v.signal === 'bearish')
+    .sort((a, b) => (a.score ?? 100) - (b.score ?? 100))
+    .slice(0, 3)
+  const abst = panel.abstention || {}
+  // 弃权原因别写死三项：UZI 后来加了 strategy_out_of_scope（流派不适用），
+  // 写死会把 22 人漏掉、只显示 6 人弃权，与实际 28 人对不上。
+  const abstLabelMap: Record<string, string> = {
+    missing_data: '缺数据',
+    missing_model: '缺模型',
+    market_not_applicable: '市场不适用',
+    strategy_out_of_scope: '流派不适用',
+  }
+  const abstTotal = Object.values(abst).reduce((acc, n) => acc + (n || 0), 0)
+  const abstParts = Object.entries(abst)
+    .filter(([, n]) => (n || 0) > 0)
+    .map(([k, n]) => `${abstLabelMap[k] || k} ${n}`)
+    .join(' / ')
+
+  if (votedSum === 0 && voters.length === 0) return null
+
+  return (
+    <div className="card p-3 space-y-2.5">
+      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+        <span className="text-[12px] font-medium">评委投票</span>
+        <span className="text-[10px] text-muted-foreground">
+          {active} 位有效
+          {panel.total ? ` / 共 ${panel.total} 位` : ''}
+          {abstTotal > 0 ? ` · ${abstTotal} 位弃权（${abstParts}）` : ''}
+        </span>
+      </div>
+
+      <div className="space-y-1.5">
+        {rows.map(([label, count, cls]) => (
+          <div key={label} className="flex items-center gap-2">
+            <span className="w-14 shrink-0 text-[11px] text-muted-foreground">{label}</span>
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-accent/60">
+              <div
+                className={`h-full rounded-full ${cls}`}
+                style={{ width: `${Math.round((count / maxCount) * 100)}%` }}
+              />
+            </div>
+            <span className="w-8 shrink-0 text-right font-mono text-[11px]">{count}</span>
+          </div>
+        ))}
+      </div>
+
+      {(bulls.length > 0 || bears.length > 0) && (
+        <div className="grid grid-cols-2 gap-3 border-t border-border/50 pt-2">
+          <div className="space-y-1.5">
+            <div className="text-[10px] text-muted-foreground">最看好</div>
+            {bulls.map((inv) => (
+              <UziInvestorRow key={inv.id || inv.name} inv={inv} tone="bull" />
+            ))}
+            {bulls.length === 0 && <div className="text-[10px] text-muted-foreground">无人看多</div>}
+          </div>
+          <div className="space-y-1.5">
+            <div className="text-[10px] text-muted-foreground">最看空</div>
+            {bears.map((inv) => (
+              <UziInvestorRow key={inv.id || inv.name} inv={inv} tone="bear" />
+            ))}
+            {bears.length === 0 && <div className="text-[10px] text-muted-foreground">无人看空</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function UziReportSection({
   report,
   symbol,
@@ -2458,7 +2694,7 @@ function UziReportSection({
           {report?.fundamental_score != null && (
             <span
               className="text-[10px] text-muted-foreground/75"
-              title="UZI 的 19 维基本面加权分：没取到数据的维度（宏观/行业/原材料/期货/政策/护城河/杀猪盘等）按中性 5 分占位，不构成判断"
+              title="UZI 官方基本面分：19 维加权后再按股票风格（白马/成长/周期…）调权，综合分公式里的「基本面」就是它。与上方实测口径分的差别来自「没真实数据的维要不要按中性分占位」"
             >
               （UZI 基本面 {report.fundamental_score}
               {report.uzi_overall_score != null && report.panel_consensus != null
@@ -2559,6 +2795,7 @@ function UziReportSection({
               [
                 ['lite', 'lite · 快（约 3–6 分钟，7 维采集）'],
                 ['medium', 'medium · 全维度（约 6–15 分钟，20 维 + 联网搜索）'],
+                ['deep', 'deep · 深度调研（约 20–30 分钟，预算翻倍 + 浏览器兜底）'],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -2579,7 +2816,9 @@ function UziReportSection({
             {report
               ? '会强制重抓数据（不复用上一次缓存），所以比「仅同步」慢。'
               : '首次调研会全新抓取数据，不复用任何历史缓存。'}
-            deep 档要求 agent 介入 66 评委角色扮演，后台一键跑出来的 deep 产物不完整，故未开放。
+            {tier === 'deep'
+              ? 'deep 分两段跑：先深度采集（搜索预算 30→60、机构持仓 20→100 家、Playwright 兜底 6→10 维），再用同一份数据重算评分出报告。评分口径与 medium 相同，深的是数据不是算法。'
+              : 'deep 档更慢（约 20–30 分钟）且会开浏览器兜底，想补全 3_macro / 13_policy / 18_trap / 19_contests 这几维时再选。'}
             调研期间可以关闭弹窗，任务仍在服务端跑完；重新打开会接着显示进度。
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -2769,10 +3008,24 @@ function UziReportSection({
             ) : (
               <>其中「体检结果 x 分」是 UZI 的综合分（基本面加权 + 评委投票），</>
             )}
-            上方大字只统计真有采集数据的维度，两者口径不同，判断以上方为准。
+            {/* 口径差异写死在这里：用户最容易问「报告里 66.3、页面上 68，哪个对」 */}
+            <span className="text-foreground/70">
+              {integ?.real_score != null
+                ? `上方大字 ${integ.real_score} 是实测口径——只统计真有采集数据的 ${integ.real_dims ?? '?'}/${
+                    integ.total_dims ?? '?'
+                  } 维；`
+                : '上方大字是实测口径，'}
+              报告详情页印的 {report?.fundamental_score ?? '—'} 是 UZI 官方口径（19 维全加权，缺数据的维按中性分占位）。
+              两者必然不等，差多少取决于缺了几维，判断以上方为准。
+            </span>
           </div>
         </div>
       )}
+
+      {/* 作战计划放在评委投票上方：先看 UZI 给了什么价位，再看是谁投的票 */}
+      {report.plan && <UziPlanCard plan={report.plan} />}
+
+      {report.panel && <UziPanelBoard panel={report.panel} />}
 
       {trap && (
         <div className="card p-3">

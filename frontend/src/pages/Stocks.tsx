@@ -72,7 +72,7 @@ function UziTag({ info, onOpen }: { info: UziListItem; onOpen: () => void }) {
           info.real_weight_pct ?? 0
         ).toFixed(0)}%）`
       : `数据不足，未评分（${info.real_dims ?? 0}/${info.total_dims ?? '?'} 维有真实数据）`,
-    info.fundamental_score != null ? `UZI 基本面分 ${info.fundamental_score}（19 维全加权，含占位/默认分，仅供参考）` : '',
+    info.fundamental_score != null ? `UZI 官方基本面分 ${info.fundamental_score}（19 维加权+风格调权，含占位/默认分，与上面实测口径分口径不同）` : '',
     brief,
     '点击进入 UZI 调研结果页',
   ]

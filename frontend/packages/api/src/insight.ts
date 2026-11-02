@@ -140,6 +140,63 @@ export interface UziScoreIntegrity {
   note?: string
 }
 
+/** panel.json 摘要里的单个评委（sync 时截取，见 uzi_sync._panel_brief） */
+export interface UziPanelInvestor {
+  id?: string
+  name?: string
+  group?: string
+  signal?: string
+  verdict?: string
+  score?: number | null
+  confidence?: number | null
+  /** 一行结论，比 reasoning 短，用来解释「为什么看好/看空」 */
+  headline?: string
+  avatar?: string
+  abstention?: string | null
+  skip_reason?: string | null
+}
+
+export interface UziPanel {
+  /** 5 档票数（强烈买入/买入/关注/观望/回避）。注意与 3 档 signal 分布不是同一口径 */
+  vote?: {
+    strongly_buy?: number
+    buy?: number
+    watch?: number
+    wait?: number
+    avoid?: number
+    n_a?: number
+    skip?: number
+  }
+  /** 弃权原因：missing_data / missing_model / market_not_applicable */
+  abstention?: Record<string, number>
+  /** 有效票数（5 档加总） */
+  active?: number | null
+  /** 评委总数 */
+  total?: number | null
+  investors?: UziPanelInvestor[]
+}
+
+/** UZI 原文的「作战计划」。⚠️ 不是本系统信号：buy_zones / exit_triggers 一贯不采信、
+ *  不进徽章，只作可读展示；本系统入场/止损以执行层规则为准。 */
+export interface UziPlan {
+  core_conclusion?: string
+  battle_plan?: {
+    entry?: string | null
+    position?: string | null
+    stop?: string | null
+    target?: string | null
+  }
+  /** 四流派买点（价值/成长/技术/游资），每档带 UZI 给的依据 */
+  buy_zones?: Array<{ school: string; price: number | string; rationale?: string }>
+  /** UZI 给的退出/止损条件（原文） */
+  exit_triggers?: string[]
+  scenarios?: {
+    entry_price?: number | null
+    cases?: Array<{ name?: string; probability?: string; return?: number | null }>
+  }
+  data_view?: Record<string, string>
+}
+
 export interface UziReport {
   exists: boolean
   symbol?: string
@@ -167,6 +224,10 @@ export interface UziReport {
   field_coverage_pct?: number
   dimensions?: Record<string, UziDimension>
   dim_status?: Record<string, UziDimStatus>
+  /** 评委投票分布 + 名单；老数据没有这份摘要时为 null，前端整块不渲染 */
+  panel?: UziPanel | null
+  /** UZI 原文作战计划；老报告（无 dashboard）或未重新同步时为 null，前端整块不渲染 */
+  plan?: UziPlan | null
   html_available?: boolean
 }
 

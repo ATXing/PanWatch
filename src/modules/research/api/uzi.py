@@ -72,7 +72,8 @@ def _fetch_row(symbol: str, market: str):
             SELECT symbol, market, tier, as_of_date, fundamental_score,
                    one_liner, coverage_pct, dimensions_json, html_path, dim_status_json,
                    score_integrity_json, uzi_overall_score, panel_consensus,
-                   consensus_valid, verdict_detail, verdict_label, panel_active
+                   consensus_valid, verdict_detail, verdict_label, panel_active,
+                   panel_json, plan_json
             FROM uzi_reports WHERE symbol=? AND market=?
             """,
             (symbol, market),
@@ -153,10 +154,25 @@ def get_uzi_report(symbol: str, market: str, db: Session = Depends(get_db)):
         verdict_detail,
         verdict_label,
         panel_active,
+        panel_json,
+        plan_json,
     ) = row
     dims = json.loads(dims_json) if dims_json else {}
     dim_status = json.loads(dim_status_json) if dim_status_json else {}
     integrity = json.loads(integrity_json) if integrity_json else {}
+    # 2026-11-02 · 评委投票分布 + 名单（share-card.png 上的「投票条 / 谁最看好」）。
+    # 老数据没有这列 → None，前端整块不渲染，不造数。
+    try:
+        panel = json.loads(panel_json) if panel_json else None
+    except (TypeError, ValueError):
+        panel = None
+    # 2026-11-03 · UZI 原文的「作战计划」（入场/仓位/止损/目标 + 四流派买点 + 退出条件）。
+    # ⚠️ 这不是本系统信号：UZI 的 buy_zones / exit_triggers 一贯不采信、不进徽章，
+    # 前端必须带「UZI 原文」标注展示，交易规则仍以 PanWatch 执行层为准。
+    try:
+        plan = json.loads(plan_json) if plan_json else None
+    except (TypeError, ValueError):
+        plan = None
     return {
         "exists": True,
         "symbol": symbol,
@@ -180,6 +196,8 @@ def get_uzi_report(symbol: str, market: str, db: Session = Depends(get_db)):
         "field_coverage_pct": coverage,
         "dimensions": dims,
         "dim_status": dim_status,
+        "panel": panel,
+        "plan": plan,
         "html_available": bool(html_path and os.path.exists(html_path)),
     }
 
@@ -229,7 +247,10 @@ def resync_uzi(
 def analyze_uzi(
     symbol: str = Query(...),
     market: str = Query(...),
-    tier: str | None = Query(None, description="lite / medium（deep 需 agent 介入，不开放）"),
+    tier: str | None = Query(
+        None,
+        description="lite / medium / deep；deep 走两段式（深采后再重算出报告，约 20–30 分钟）",
+    ),
 ):
     """在后台真跑一次 UZI 调研（子进程），立即返回任务信息。
 
