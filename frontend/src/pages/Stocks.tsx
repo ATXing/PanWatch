@@ -311,7 +311,8 @@ export default function StocksPage() {
   const [insightName, setInsightName] = useState<string | undefined>(undefined)
   const [insightHasPosition, setInsightHasPosition] = useState(false)
   // 打开洞察弹窗时直接落在哪个 tab(从列表「UZI xx」标签一键进来用)
-  const [insightInitialTab, setInsightInitialTab] = useState<'uzi' | undefined>(undefined)
+  const [insightInitialTab, setInsightInitialTab] = useState<'uzi' | 'deep' | undefined>(undefined)
+  const [insightStockId, setInsightStockId] = useState<number | undefined>(undefined)
   // UZI 调研摘要:key = `${symbol}|${market}`,一次拉全量,不在每行单独请求
   const [uziMap, setUziMap] = useState<Record<string, UziListItem>>({})
   // TradingAgents 深度分析摘要:key = symbol(analysis_history 只按 stock_symbol 存)。
@@ -824,22 +825,35 @@ export default function StocksPage() {
     loadNews(stockName)
   }, [loadNews])
 
-  const openStockDetail = useCallback((stockSymbol: string, stockMarket: string, stockName?: string, hasPosition?: boolean) => {
+  const openStockDetail = useCallback((stockSymbol: string, stockMarket: string, stockName?: string, hasPosition?: boolean, stockId?: number) => {
     setInsightInitialTab(undefined)
     setInsightSymbol(stockSymbol)
     setInsightMarket(stockMarket || 'CN')
     setInsightName(stockName)
     setInsightHasPosition(!!hasPosition)
+    setInsightStockId(stockId)
     setInsightOpen(true)
   }, [])
 
   // 点「UZI xx」标签:打开同一个洞察弹窗,直接落在 UZI 调研 tab
-  const openUziReport = useCallback((stockSymbol: string, stockMarket: string, stockName?: string, hasPosition?: boolean) => {
+  const openUziReport = useCallback((stockSymbol: string, stockMarket: string, stockName?: string, hasPosition?: boolean, stockId?: number) => {
     setInsightSymbol(stockSymbol)
     setInsightMarket(stockMarket || 'CN')
     setInsightName(stockName)
     setInsightHasPosition(!!hasPosition)
+    setInsightStockId(stockId)
     setInsightInitialTab('uzi')
+    setInsightOpen(true)
+  }, [])
+
+  // 点「TA」徽章:打开同一个洞察弹窗,直接落在深度(TradingAgents)tab
+  const openDeepTab = useCallback((stockSymbol: string, stockMarket: string, stockName?: string, hasPosition?: boolean, stockId?: number) => {
+    setInsightSymbol(stockSymbol)
+    setInsightMarket(stockMarket || 'CN')
+    setInsightName(stockName)
+    setInsightHasPosition(!!hasPosition)
+    setInsightStockId(stockId)
+    setInsightInitialTab('deep')
     setInsightOpen(true)
   }, [])
 
@@ -2164,7 +2178,7 @@ export default function StocksPage() {
                                       </span>
                                       <button
                                         className="text-[12px] text-muted-foreground hover:text-primary"
-                                        onClick={() => openStockDetail(pos.symbol, pos.market, pos.name, true)}
+                                        onClick={() => openStockDetail(pos.symbol, pos.market, pos.name, true, pos.stock_id)}
                                       >
                                         {pos.name}
                                         {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
@@ -2179,15 +2193,15 @@ export default function StocksPage() {
                                     {(() => {
                                       const uzi = uziMap[`${pos.symbol}|${pos.market}`]
                                       return uzi ? (
-                                        <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                        <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true, pos.stock_id)} />
                                       ) : (
-                                        <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                        <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true, pos.stock_id)} />
                                       )
                                     })()}
                                     {taLoadedKey === taSymbolsKey && (() => {
                                       const ta = taMap[pos.symbol]
                                       return ta ? (
-                                        <TaTag info={ta} onOpen={() => openDeepAnalysis(pos.stock_id, pos.symbol, pos.name)} />
+                                        <TaTag info={ta} onOpen={() => openDeepTab(pos.symbol, pos.market, pos.name, true, pos.stock_id)} />
                                       ) : (
                                         <TaEmptyTag onOpen={() => openDeepAnalysis(pos.stock_id, pos.symbol, pos.name)} />
                                       )
@@ -2368,7 +2382,7 @@ export default function StocksPage() {
                                     </span>
                                     <button
                                       className="min-w-0 text-[12px] text-muted-foreground hover:text-primary truncate"
-                                      onClick={() => openStockDetail(pos.symbol, pos.market, pos.name, true)}
+                                      onClick={() => openStockDetail(pos.symbol, pos.market, pos.name, true, pos.stock_id)}
                                     >
                                       {pos.name}
                                       {pos.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
@@ -2383,15 +2397,15 @@ export default function StocksPage() {
                                   {(() => {
                                     const uzi = uziMap[`${pos.symbol}|${pos.market}`]
                                     return uzi ? (
-                                      <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                      <UziTag info={uzi} onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true, pos.stock_id)} />
                                     ) : (
-                                      <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true)} />
+                                      <UziEmptyTag onOpen={() => openUziReport(pos.symbol, pos.market, pos.name, true, pos.stock_id)} />
                                     )
                                   })()}
                                   {taLoadedKey === taSymbolsKey && (() => {
                                     const ta = taMap[pos.symbol]
                                     return ta ? (
-                                      <TaTag info={ta} onOpen={() => openDeepAnalysis(pos.stock_id, pos.symbol, pos.name)} />
+                                      <TaTag info={ta} onOpen={() => openDeepTab(pos.symbol, pos.market, pos.name, true, pos.stock_id)} />
                                     ) : (
                                       <TaEmptyTag onOpen={() => openDeepAnalysis(pos.stock_id, pos.symbol, pos.name)} />
                                     )
@@ -2641,13 +2655,13 @@ export default function StocksPage() {
                             </span>
                             <button
                               className="shrink-0 font-mono text-[12px] font-semibold text-foreground hover:text-primary"
-                              onClick={(e) => { e.stopPropagation(); if (tour?.active && tour.step === 'stock') { void tour.selectStock(stock.id); return }; openStockDetail(stock.symbol, stock.market, stock.name, false) }}
+                              onClick={(e) => { e.stopPropagation(); if (tour?.active && tour.step === 'stock') { void tour.selectStock(stock.id); return }; openStockDetail(stock.symbol, stock.market, stock.name, false, stock.id) }}
                             >
                               {stock.symbol}
                             </button>
                             <button
                               className="min-w-0 text-[12px] text-muted-foreground truncate hover:text-primary"
-                              onClick={(e) => { e.stopPropagation(); if (tour?.active && tour.step === 'stock') { void tour.selectStock(stock.id); return }; openStockDetail(stock.symbol, stock.market, stock.name, false) }}
+                              onClick={(e) => { e.stopPropagation(); if (tour?.active && tour.step === 'stock') { void tour.selectStock(stock.id); return }; openStockDetail(stock.symbol, stock.market, stock.name, false, stock.id) }}
                             >
                               {stock.name}
                               {stock.asset_type === 'etf' && <Badge variant="secondary" className="ml-1">{stockT('stocksPage.assetTypes.etf')}</Badge>}
@@ -2662,15 +2676,15 @@ export default function StocksPage() {
                           {(() => {
                             const uzi = uziMap[`${stock.symbol}|${stock.market}`]
                             return uzi ? (
-                              <UziTag info={uzi} onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} />
+                              <UziTag info={uzi} onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false, stock.id)} />
                             ) : (
-                              <UziEmptyTag onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false)} />
+                              <UziEmptyTag onOpen={() => openUziReport(stock.symbol, stock.market, stock.name, false, stock.id)} />
                             )
                           })()}
                           {taLoadedKey === taSymbolsKey && (() => {
                             const ta = taMap[stock.symbol]
                             return ta ? (
-                              <TaTag info={ta} onOpen={() => openDeepAnalysis(stock.id, stock.symbol, stock.name)} />
+                              <TaTag info={ta} onOpen={() => openDeepTab(stock.symbol, stock.market, stock.name, false, stock.id)} />
                             ) : (
                               <TaEmptyTag onOpen={() => openDeepAnalysis(stock.id, stock.symbol, stock.name)} />
                             )
@@ -2762,7 +2776,7 @@ export default function StocksPage() {
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
-                          onClick={() => openStockDetail(stock.symbol, stock.market, stock.name, false)}
+                          onClick={() => openStockDetail(stock.symbol, stock.market, stock.name, false, stock.id)}
                           title={stockT('stocksPage.messages.detail')}
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
@@ -2806,6 +2820,7 @@ export default function StocksPage() {
         hasPosition={insightHasPosition}
         initialTab={insightInitialTab}
         onUziUpdated={loadUziMap}
+        onRerun={insightStockId != null ? () => openDeepAnalysis(insightStockId, insightSymbol, insightName || '') : undefined}
       />
 
       {/* TradingAgents 深度分析弹窗 */}

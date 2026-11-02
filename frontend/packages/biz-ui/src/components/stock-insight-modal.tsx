@@ -351,6 +351,8 @@ export default function StockInsightModal(props: {
   initialTab?: InsightTab
   /** UZI 重新调研完成后回调：列表页据此刷新「UZI xx」标签 */
   onUziUpdated?: () => void
+  /** deep tab 的「重新分析」按钮：唤起 TradingAgents 重跑(走原版 🧠 弹窗) */
+  onRerun?: () => void
 }) {
   const { toast } = useToast()
   const { palette } = useMarketColors()
@@ -1797,6 +1799,7 @@ export default function StockInsightModal(props: {
                   showDebate={deepShowDebate}
                   setShowDebate={setDeepShowDebate}
                   onRefresh={loadDeepResult}
+                  onRerun={props.onRerun}
                 />
               </div>
             )}
@@ -1956,6 +1959,7 @@ function DeepAnalysisSection({
   showDebate,
   setShowDebate,
   onRefresh,
+  onRerun,
 }: {
   loading: boolean
   loaded: boolean
@@ -1967,6 +1971,7 @@ function DeepAnalysisSection({
   showDebate: boolean
   setShowDebate: (v: boolean) => void
   onRefresh: () => void
+  onRerun?: () => void
 }) {
   const { t } = useTranslation('bizUi')
   const tr = (key: string, options?: Record<string, unknown>) =>
@@ -2003,9 +2008,16 @@ function DeepAnalysisSection({
         <div className="text-[11px] text-muted-foreground">
           {tr('deep.title')}
         </div>
-        <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={onRefresh} disabled={loading || historyLoading}>
-          <RefreshCw className={`w-3.5 h-3.5 ${loading || historyLoading ? 'animate-spin' : ''}`} />
-        </Button>
+        <div className="flex items-center gap-2">
+          {onRerun && (
+            <Button variant="outline" size="sm" className="h-7 px-2.5 text-[11px]" onClick={onRerun}>
+              {tr('deep.rerun')}
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={onRefresh} disabled={loading || historyLoading}>
+            <RefreshCw className={`w-3.5 h-3.5 ${loading || historyLoading ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
       </div>
 
       {result && <AnalysisMetadata result={result} />}
