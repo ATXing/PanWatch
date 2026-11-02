@@ -513,7 +513,7 @@ def _build_stages(plan: DimPlan, parsed: dict) -> list[dict]:
             if spec.key == "collect_w3" and parsed["usage"].get("collect_sec"):
                 detail += f" · {parsed['usage']['collect_sec']:.0f}s"
         elif spec.key == "scoring":
-            detail = f"{parsed['counts']['reported']}/{plan.total} 维"
+            detail = f"采集上报 {parsed['counts']['reported']}/{plan.total}（含取空）"
 
         rows.append(
             {"key": spec.key, "label": spec.label, "status": status, "detail": detail}

@@ -18,6 +18,7 @@ import json
 import os
 import shutil
 import sqlite3
+from datetime import datetime
 
 # 可通过环境变量覆盖(部署路径不同/测试时用)
 UZI_SCRIPTS = os.environ.get(
@@ -423,6 +424,60 @@ def _ensure_table(conn: sqlite3.Connection):
             conn.execute(f"ALTER TABLE uzi_reports ADD COLUMN {col} {typ}")
 
 
+def _refresh_job_card(conn: sqlite3.Connection, sym: str, market: str, ticker: str, result: dict):
+    """同步后把最新一条非运行中的 uzi_jobs 卡片对齐到刚写入的报告。
+
+    背景:补充调研 / 「仅同步」只写 uzi_reports,不碰 uzi_jobs;而界面「调研完成」
+    卡片读的是 uzi_jobs。二者分叉会让 stock-insight-modal 弹出
+    「这条记录与当前报告不是同一次」横幅——它用档位 + 实测维度数判断是否同一次,
+    本意是防止跨运行的假分数变化。这里让「同步即刷新卡片」,卡片永远反映最新报告,
+    横幅不再误弹。运行中(running)的任务不动,避免打断进度展示。
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS uzi_jobs (
+            job_id VARCHAR PRIMARY KEY,
+            symbol VARCHAR NOT NULL,
+            market VARCHAR NOT NULL,
+            ticker VARCHAR,
+            tier VARCHAR,
+            status VARCHAR,
+            pid INTEGER,
+            started_at DATETIME,
+            finished_at DATETIME,
+            exit_code INTEGER,
+            log_path VARCHAR,
+            error TEXT,
+            result_json TEXT,
+            updated_at DATETIME
+        )
+        """
+    )
+    row = conn.execute(
+        "SELECT job_id, status FROM uzi_jobs WHERE symbol=? AND market=? "
+        "ORDER BY started_at DESC LIMIT 1",
+        (sym, market),
+    ).fetchone()
+    if not row:
+        return
+    if row[1] == "running":
+        return
+    # 用本地时间写,让卡片显示成「刚刚刷新」(CURRENT_TIMESTAMP 是 UTC,会差 8 小时)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        """
+        UPDATE uzi_jobs
+        SET status='success',
+            started_at=?,
+            finished_at=?,
+            tier=?,
+            result_json=?
+        WHERE job_id=?
+        """,
+        (now, now, result.get("tier"), json.dumps(result, ensure_ascii=False), row[0]),
+    )
+
+
 def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
     """对单只 UZI ticker 同步最新结果进 PanWatch。无 .cache 产出则返回 None。"""
     cache = os.path.join(UZI_SCRIPTS, ".cache", ticker)
@@ -543,6 +598,31 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                 verdict_label,
                 panel_active,
             ),
+        )
+        # 同步即刷新「调研完成」卡片:让 uzi_jobs 与刚写入的 uzi_reports 对齐,
+        # 否则补充调研 / 仅同步后卡片停在更早那次运行,会误弹「不是同一次」横幅。
+        _refresh_job_card(
+            conn,
+            sym,
+            market,
+            ticker,
+            {
+                "symbol": sym,
+                "market": market,
+                "ticker_raw": ticker,
+                "tier": tier,
+                "as_of_date": as_of,
+                "fundamental_score": score,
+                "coverage_pct": coverage,
+                "real_score": score_integrity.get("real_score"),
+                "real_dims": score_integrity.get("real_dims"),
+                "total_dims": score_integrity.get("total_dims"),
+                "trusted": score_integrity.get("trusted"),
+                "uzi_overall_score": uzi_overall,
+                "panel_consensus": panel_consensus,
+                "panel_active": panel_active,
+                "verdict_label": verdict_label,
+            },
         )
         conn.commit()
     finally:

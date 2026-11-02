@@ -225,7 +225,7 @@ export interface UziStageRow {
   key: UziStageKey
   label: string
   status: 'pending' | 'running' | 'done' | 'skipped' | 'failed'
-  /** "13/17"、"22/22 维"、"464.9s" */
+  /** "13/17"（评分实测）、"采集上报 22/22（含取空）"、"464.9s" —— 前后两者口径不同，不可混用 */
   detail?: string
 }
 
@@ -254,7 +254,7 @@ export interface UziDimItem {
 export interface UziProgressUsage {
   /** 本档位应跑的 fetcher 数（lite 9 / medium 22） */
   fetchers_expected: number
-  /** banner 里 UZI 自报的 "fetchers: 20/20 维" */
+  /** banner 里 UZI 自报的 "fetchers: 20/20 维"（采集上报数，含取空/超时，不代表实测） */
   fetchers_declared?: number | null
   fetchers_total?: number | null
   max_workers?: number | null

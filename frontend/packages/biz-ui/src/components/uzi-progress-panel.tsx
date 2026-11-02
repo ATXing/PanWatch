@@ -134,7 +134,7 @@ function DimGrid({ items }: { items: UziDimItem[] }) {
 function UsageFoot({ progress }: { progress: UziProgress }) {
   const u = progress.usage
   const parts: string[] = []
-  parts.push(`采集调用 ${progress.dims.reported}/${u.fetchers_expected}`)
+  parts.push(`采集上报 ${progress.dims.reported}/${u.fetchers_expected}（含取空）`)
   const bad = progress.dims.error + progress.dims.timeout
   if (bad > 0) parts.push(`失败/超时 ${bad}`)
   if (u.source_logins > 0) parts.push(`数据源握手 ${u.source_logins} 次`)
@@ -188,7 +188,7 @@ export function UziProgressPanel({
   const d = progress.dims
   const curLabel =
     progress.stages.find((s) => s.key === progress.current_stage)?.label ?? '准备中'
-  const summary = `已 ${fmtElapsed(elapsedSec)} · ${curLabel} · ${d.reported}/${d.expected} 维`
+  const summary = `已 ${fmtElapsed(elapsedSec)} · ${curLabel} · 采集上报 ${d.reported}/${d.expected}（含取空）`
 
   if (collapsed) {
     return (
@@ -218,7 +218,7 @@ export function UziProgressPanel({
         <span className="font-medium">UZI 调研中</span>
         <span className="text-muted-foreground">已 {fmtElapsed(elapsedSec)}</span>
         <span className="text-muted-foreground">
-          · {d.reported}/{d.expected} 维
+          · 采集上报 {d.reported}/{d.expected}（含取空）
         </span>
         <span className="text-muted-foreground">
           · {tier ?? progress.tier}档 · 约 {(tier ?? progress.tier) === 'lite' ? '3–6' : '6–15'} 分钟
