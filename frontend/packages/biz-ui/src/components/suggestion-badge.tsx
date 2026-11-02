@@ -271,7 +271,7 @@ export function SuggestionBadge({
   // 语义：原结果是「当天」的 → 弹窗主区保持不动，按钮下方追加「最新结果」对比卡；
   //       原结果非当天 → 主区直接替换；去重未产生新行 → 显示「结论未变」。
   const REEVAL_POLL_MS = 5000
-  const REEVAL_TIMEOUT_MS = 90_000
+  const REEVAL_TIMEOUT_MS = 180_000
   const [reevaluating, setReevaluating] = useState(false)
   // 打开弹窗时锁定的「原结果」：主区始终展示它，不被建议池刷新替换
   const [pinned, setPinned] = useState<SuggestionInfo | null>(null)
