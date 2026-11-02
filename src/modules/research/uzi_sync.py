@@ -233,6 +233,64 @@ _CORE_EMPTY_NOTE = {
 
 
 
+# ── 18_trap label 与实测档位对齐 ─────────────────────────────────────────────
+# UZI 的 score_fns 把 18_trap 的 label 写死成「🟢 未发现推广痕迹（实测 命中 N/8 …）」，
+# 分数也恒定 9（口径如此），**不管实测档位是注意还是高度可疑**。于是会出现
+# 「面板写 🟢 安全、one-liner 末行写 🔴 高度可疑」的自相矛盾（2026-11-02 紫金矿业）。
+# 口径不动，只把 label 的结论前缀改回实打实的档位；括号里的实测证据原样保留。
+_TRAP_BUCKETS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("green", ("🟢", "安全"), "🟢 安全"),
+    ("yellow", ("🟡", "注意"), "🟡 注意"),
+    ("orange", ("🟠", "警惕"), "🟠 警惕"),
+    ("red", ("🔴", "可疑"), "🔴 高度可疑"),
+)
+
+
+def _trap_bucket(text: str) -> str | None:
+    """把各种写法（规范 emoji 档位 / 裸词 低中高 / 未取证）归一到一个桶。"""
+    t = str(text or "")
+    if not t.strip():
+        return None
+    if "⚪" in t or "未取证" in t:
+        return "unknown"
+    for name, marks, _label in _TRAP_BUCKETS:
+        if any(m in t for m in marks):
+            return name
+    bare = t.strip()
+    if bare in {"低", "低风险", "风险低"}:
+        return "green"
+    if bare in {"中", "中风险", "风险中"}:
+        return "yellow"
+    if bare in {"高", "高风险", "风险高"}:
+        return "red"
+    return None
+
+
+def _align_trap_label(dims: dict, raw_dims: dict) -> None:
+    """18_trap 的 label 前缀按实测 trap_level 改写（只改文案，不改 score/weight）。"""
+    dim = dims.get("18_trap")
+    if not isinstance(dim, dict):
+        return
+    data = ((raw_dims.get("18_trap") or {}).get("data")) or {}
+    if not isinstance(data, dict):
+        return
+    bucket = _trap_bucket(data.get("trap_level"))
+    if bucket in (None, "green"):
+        return  # 实测就是安全档，或认不出的值：保持 UZI 原文
+    label = str(dim.get("label") or "")
+    if bucket == "unknown":
+        # 没扫到公开帖：UZI 原文仍以「🟢 未发现推广痕迹」开头（只靠括号里补「未取证」），
+        # 绿点会让人误以为已排查干净，这里直接改成未取证档。
+        dim["label"] = "⚪ 未取证（未扫到公开帖，不构成「安全」结论，不计入可信分）"
+        return
+    head = next(lb for name, _marks, lb in _TRAP_BUCKETS if name == bucket)
+    # label 形如「🟢 未发现推广痕迹（实测 命中 3/8 信号 · 已扫 4 组公开帖）」
+    rest = ""
+    if "（" in label:
+        rest = label[label.index("（"):]
+    dim["label"] = f"{head}{rest}"
+
+
 def _dim_status(dims: dict, raw_dims: dict) -> dict[str, dict]:
     """给每个已打分维度标注数据性质,返回 {dimkey: {status, note?}}。"""
     out: dict[str, dict] = {}
@@ -262,6 +320,10 @@ def _dim_status(dims: dict, raw_dims: dict) -> dict[str, dict]:
             data = (raw or {}).get("data") or {}
             level = data.get("trap_level")
             hit = data.get("signals_hit")
+            # 手工快照里 signals_hit 可能写成整数 0/1，`0 or '—'` 会把 0 显示成「—」，
+            # 看着像「没扫过」；统一补成 N/8。
+            if isinstance(hit, (int, float)) and not isinstance(hit, bool):
+                hit = f"{int(hit)}/8"
             ev = data.get("evidence_count")
             snips = data.get("snippets") or {}
             if has_raw and level and (snips or data.get("signals_hit_count")):
@@ -382,6 +444,48 @@ def _score_integrity(dims: dict, dim_status: dict) -> dict:
 
 
 
+def _panel_brief(pj: dict) -> dict:
+    """把 panel.json 压成前端够用的一小份：5 档票数 + 弃权原因 + 评委名单。
+
+    背景：share-card.png 上「投票分布 / 谁最看好 / 谁最看空」这三块在 PanWatch
+    里一直没有落点——sync 只搬了 standalone HTML，图片和 panel.json 都没进来。
+    这里把必要字段抽成一小份 JSON 存库，前端就能原生渲染，不必依赖那张 1080×1920 的图。
+
+    口径提醒：vote_distribution 是 **5 档**（强烈买入/买入/关注/观望/回避），
+    signal_distribution 是 **3 档**（bullish/neutral/bearish），二者不可混用。
+    分享卡上「50 位大佬投票」是模板写死的文案，实际有效票数按 5 档加总。
+    """
+    vote = pj.get("vote_distribution") or {}
+    investors = []
+    for inv in pj.get("investors") or []:
+        if not isinstance(inv, dict):
+            continue
+        investors.append(
+            {
+                "id": inv.get("investor_id"),
+                "name": inv.get("name"),
+                "group": inv.get("group"),
+                "signal": inv.get("signal"),
+                "verdict": inv.get("verdict"),
+                "score": inv.get("score"),
+                "confidence": inv.get("confidence"),
+                # headline 比 reasoning 短得多，够做「为什么看好/看空」的一行说明
+                "headline": str(inv.get("headline") or inv.get("comment") or "")[:120],
+                "avatar": inv.get("avatar"),
+                "abstention": inv.get("abstention_category"),
+                "skip_reason": inv.get("skip_reason"),
+            }
+        )
+    active = sum(int(vote.get(k) or 0) for k in ("strongly_buy", "buy", "watch", "wait", "avoid"))
+    return {
+        "vote": {k: int(vote.get(k) or 0) for k in ("strongly_buy", "buy", "watch", "wait", "avoid", "n_a", "skip")},
+        "abstention": pj.get("abstention_distribution") or {},
+        "active": active or None,
+        "total": len(investors) or None,
+        "investors": investors,
+    }
+
+
 def _ensure_table(conn: sqlite3.Connection):
     conn.execute(
         """
@@ -419,6 +523,9 @@ def _ensure_table(conn: sqlite3.Connection):
         ("verdict_detail", "VARCHAR"),
         ("verdict_label", "VARCHAR"),
         ("panel_active", "INTEGER"),
+        # 2026-11-02 · 评委投票分布 + 名单精简版(见 _panel_brief)。
+        # 老库没这列时留 NULL,前端整块不渲染,不补假数据。
+        ("panel_json", "TEXT"),
     ):
         if col not in cols:
             conn.execute(f"ALTER TABLE uzi_reports ADD COLUMN {col} {typ}")
@@ -493,6 +600,9 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
     tier = rd.get("_profile_depth") or "unknown"
     score = d.get("fundamental_score")
     dims = d.get("dimensions", {})
+    # 18_trap 的 label 在 UZI 里恒写「🟢 未发现推广痕迹」，与实测档位可能打架：
+    # 分数不动，只把结论前缀改回实测档位（注意/警惕/高度可疑/未取证）。
+    _align_trap_label(dims, rd.get("dimensions") or {})
     dim_status = _dim_status(dims, rd.get("dimensions") or {})
     score_integrity = _score_integrity(dims, dim_status)
     # UZI 自己的 _integrity.coverage_pct 只统计 18 个基础字段(公司名/股价/ROE/PE…),
@@ -535,15 +645,21 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
     verdict_detail = synth.get("verdict_detail")
     verdict_label = synth.get("verdict_label")
     # 有效评委人数：synthesis 没存，panel.json 的 signal_distribution 里有
+    # 2026-11-02 · 顺带把 panel.json 压成 panel_brief 存库，供前端原生渲染
+    # 「投票分布 / 谁最看好 / 谁最看空」——这三块原先只存在于 share-card.png
     panel_active = None
+    panel_brief = None
     panel_path = os.path.join(cache, "panel.json")
     if os.path.exists(panel_path):
         try:
-            dist = (json.load(open(panel_path, encoding="utf-8")) or {}).get("signal_distribution") or {}
+            pj = json.load(open(panel_path, encoding="utf-8")) or {}
+            dist = pj.get("signal_distribution") or {}
             n = sum(int(dist.get(k) or 0) for k in ("bullish", "neutral", "bearish"))
             panel_active = n or None
+            panel_brief = _panel_brief(pj)
         except Exception:
             panel_active = None
+            panel_brief = None
 
     conn = sqlite3.connect(db_path)
     try:
@@ -555,8 +671,8 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                  one_liner, coverage_pct, dimensions_json, dim_status_json,
                  score_integrity_json, report_dir, html_path,
                  uzi_overall_score, panel_consensus, consensus_valid,
-                 verdict_detail, verdict_label, panel_active, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                 verdict_detail, verdict_label, panel_active, panel_json, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
             ON CONFLICT(symbol, market) DO UPDATE SET
                 ticker_raw=excluded.ticker_raw,
                 tier=excluded.tier,
@@ -575,6 +691,7 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                 verdict_detail=excluded.verdict_detail,
                 verdict_label=excluded.verdict_label,
                 panel_active=excluded.panel_active,
+                panel_json=excluded.panel_json,
                 created_at=CURRENT_TIMESTAMP
             """,
             (
@@ -597,6 +714,7 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
                 verdict_detail,
                 verdict_label,
                 panel_active,
+                json.dumps(panel_brief, ensure_ascii=False) if panel_brief else None,
             ),
         )
         # 同步即刷新「调研完成」卡片:让 uzi_jobs 与刚写入的 uzi_reports 对齐,
@@ -644,6 +762,8 @@ def sync_symbol(ticker: str, db_path: str = PANWATCH_DB) -> dict | None:
         "panel_consensus": panel_consensus,
         "panel_active": panel_active,
         "verdict_label": verdict_label,
+        "panel_vote": (panel_brief or {}).get("vote"),
+        "panel_investors": len((panel_brief or {}).get("investors") or []) or None,
     }
 
 
