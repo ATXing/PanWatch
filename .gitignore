@@ -46,3 +46,6 @@ _req_*.txt
 _shots/
 frontend/tmp/
 .workbuddy/
+
+# 后缀式手工备份（2026-11-02）：如 start_panwatch.bat.20261102-lanbind.bak，留盘不入库
+*.bak

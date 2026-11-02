@@ -90,7 +90,7 @@ Write-Log ("start: launching uvicorn on 127.0.0.1:8123, pid owner will be this t
 Write-Log ("boot marker written to " + $svcLog)
 
 # cmd handles the redirection, so the child keeps its own byte encoding (UTF-8)
-$cli = "`"$py`" -m uvicorn server:app --host 127.0.0.1 --port 8123 >> `"$svcLog`" 2>&1"
+$cli = "`"$py`" -m uvicorn server:app --host 0.0.0.0 --port 8123 >> `"$svcLog`" 2>&1"
 [System.IO.File]::AppendAllText($svcLog, ("===== " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss") + " boot =====`r`n"), $utf8)
 
 try {

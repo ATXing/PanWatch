@@ -20,5 +20,5 @@ if not errorlevel 1 (
 )
 echo. >> "%~dp0logs\autostart.log"
 echo [%date% %time%] PanWatch boot start>> "%~dp0logs\autostart.log"
-".venv\Scripts\python.exe" -m uvicorn server:app --host 127.0.0.1 --port 8123 >> "%~dp0logs\autostart.log" 2>&1
+".venv\Scripts\python.exe" -m uvicorn server:app --host 0.0.0.0 --port 8123 >> "%~dp0logs\autostart.log" 2>&1
 echo [%date% %time%] PanWatch exited with code %errorlevel%>> "%~dp0logs\autostart.log"
