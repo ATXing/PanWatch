@@ -2675,8 +2675,13 @@ function UziReportSection({
           {report &&
             (realScore != null ? (
               <span className="flex items-baseline gap-1">
-                <span className={`text-[18px] font-bold font-mono ${scoreColor}`}>{realScore}</span>
-                <span className="text-[11px] font-normal text-muted-foreground">分 · 实测口径</span>
+                <span className={`text-[18px] font-bold font-mono ${scoreColor}`}>{realScore.toFixed(1)}</span>
+                <span className="text-[11px] font-normal text-muted-foreground">
+                  分 · <b className="font-semibold text-foreground/80">基本面</b>
+                  <span title="这个数只由 19 维体检分加权得出，不含 51 位评委的投票，所以它不是综合分；UZI 的综合分是「基本面 × 0.6 + 评委共识 × 0.4」，见右侧小字">
+                    · 实测口径（不含评委投票）
+                  </span>
+                </span>
               </span>
             ) : (
               <span className="text-[12px] font-medium text-amber-700 dark:text-amber-400">
@@ -2696,9 +2701,9 @@ function UziReportSection({
               className="text-[10px] text-muted-foreground/75"
               title="UZI 官方基本面分：19 维加权后再按股票风格（白马/成长/周期…）调权，综合分公式里的「基本面」就是它。与上方实测口径分的差别来自「没真实数据的维要不要按中性分占位」"
             >
-              （UZI 基本面 {report.fundamental_score}
+              （UZI 官方基本面 {report.fundamental_score.toFixed(1)}
               {report.uzi_overall_score != null && report.panel_consensus != null
-                ? ` · 综合 ${report.uzi_overall_score} = 基本面 × 0.6 + 评委共识 ${report.panel_consensus} × 0.4`
+                ? ` · 综合 ${report.uzi_overall_score.toFixed(1)} = 基本面 × 0.6 + 评委共识 ${report.panel_consensus.toFixed(1)} × 0.4`
                 : ''}
               ）
             </span>
@@ -2998,8 +3003,8 @@ function UziReportSection({
             report?.fundamental_score != null &&
             report?.panel_consensus != null ? (
               <>
-                其中「体检结果 {Math.trunc(report.uzi_overall_score)} 分」是 UZI 的<b>综合分</b> = 基本面{' '}
-                {report.fundamental_score} × 0.6 + 流派评委共识 {report.panel_consensus} × 0.4
+                其中「体检结果 {report.uzi_overall_score.toFixed(1)} 分」是 UZI 的<b>综合分</b> = 基本面{' '}
+                {report.fundamental_score.toFixed(1)} × 0.6 + 流派评委共识 {report.panel_consensus.toFixed(1)} × 0.4
                 {report.verdict_label ? `（${report.verdict_label}）` : ''}
                 ，评委共识是
                 {report.panel_active ? `${report.panel_active} 位有效评委投票压出来的主观分` : '评委投票压出来的主观分'}
@@ -3011,11 +3016,11 @@ function UziReportSection({
             {/* 口径差异写死在这里：用户最容易问「报告里 66.3、页面上 68，哪个对」 */}
             <span className="text-foreground/70">
               {integ?.real_score != null
-                ? `上方大字 ${integ.real_score} 是实测口径——只统计真有采集数据的 ${integ.real_dims ?? '?'}/${
+                ? `上方大字 ${integ.real_score.toFixed(1)} 是实测口径——只统计真有采集数据的 ${integ.real_dims ?? '?'}/${
                     integ.total_dims ?? '?'
                   } 维；`
                 : '上方大字是实测口径，'}
-              报告详情页印的 {report?.fundamental_score ?? '—'} 是 UZI 官方口径（19 维全加权，缺数据的维按中性分占位）。
+              报告详情页印的 {report?.fundamental_score != null ? report.fundamental_score.toFixed(1) : '—'} 是 UZI 官方口径（19 维全加权，缺数据的维按中性分占位）。
               两者必然不等，差多少取决于缺了几维，判断以上方为准。
             </span>
           </div>
